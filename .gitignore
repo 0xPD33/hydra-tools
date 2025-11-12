@@ -1,0 +1,32 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local Hydra runtime files (entire directory)
+.hydra/
+
+# Logs
+*.log
+
+# Debug files
+core
+core.*
+
+# Temporary files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
