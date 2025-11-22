@@ -1,6 +1,8 @@
 # Rust build artifacts
 /target/
+# Cargo.lock is tracked in project subdirectories (hydra-mail/)
 Cargo.lock
+!hydra-mail/Cargo.lock
 
 # IDE and editor files
 .vscode/

@@ -81,19 +81,4 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_mpsc_channel() -> Result<()> {
-        let project_uuid = Uuid::new_v4();
-        let topic = "test:mpsc";
-
-        let tx = channels::get_or_create_mpsc_tx(project_uuid, topic).await;
-        
-        // Clone test - verify both are valid senders
-        let tx_clone = tx.clone();
-        // Note: mpsc receivers are created separately in real impl
-        // For now, just verify clone works (no panic)
-        assert!(true);
-
-        Ok(())
-    }
 }

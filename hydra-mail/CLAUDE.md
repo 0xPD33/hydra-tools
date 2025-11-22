@@ -137,6 +137,60 @@ cargo test --release
 - Simulates real agent workflows
 - Cleanup of test directories after execution
 
+### Interactive Testing
+
+#### Tmux Multi-Pane Demo
+Launch an interactive 4-pane tmux session to visualize agent communication:
+
+```bash
+# Quick launch via manual_test.sh
+./tests/manual_test.sh tmux
+
+# Or run directly
+./tests/tmux_demo.sh
+```
+
+**Layout:**
+- **Top-Left**: Main work pane with example emit commands
+- **Top-Right**: `repo:delta` subscriber (code changes)
+- **Bottom-Left**: `team:alert` subscriber (errors/warnings)
+- **Bottom-Right**: `team:status` subscriber (progress updates)
+
+**Features:**
+- Automatic project initialization with daemon
+- Pre-configured channel subscribers
+- Live message broadcasting across panes
+- Clean teardown on exit
+
+#### Manual Test Helper
+The `tests/manual_test.sh` script provides convenient commands for manual testing:
+
+```bash
+# Initialize test environment
+./tests/manual_test.sh setup
+
+# Emit test messages
+./tests/manual_test.sh emit repo:delta '{"action":"test","target":"demo.rs"}'
+
+# Subscribe to channel
+./tests/manual_test.sh sub repo:delta
+
+# Test replay buffer
+./tests/manual_test.sh replay test:history
+
+# Stress test (1000 messages)
+./tests/manual_test.sh stress perf:test 1000
+
+# Multi-subscriber test
+./tests/manual_test.sh multi test:broadcast
+
+# Launch tmux demo
+./tests/manual_test.sh tmux
+
+# Cleanup
+./tests/manual_test.sh cleanup
+```
+
 ## Dependencies
 
 ### Core Dependencies

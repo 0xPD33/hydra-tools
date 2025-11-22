@@ -1,0 +1,12 @@
+{
+  "name": "hydra-mail",
+  "description": "Multi-agent pub/sub messaging with TOON encoding for token efficiency - enables lightweight coordination between AI agents via broadcast channels",
+  "version": "0.1.0",
+  "author": {
+    "name": "0xPD33"
+  },
+  "homepage": "https://github.com/0xPD33/hydra-tools",
+  "repository": "https://github.com/0xPD33/hydra-tools",
+  "license": "MIT",
+  "keywords": ["multi-agent", "pub-sub", "messaging", "collaboration", "toon", "coordination"]
+}

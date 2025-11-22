@@ -66,45 +66,47 @@
         };
 
         # --- Crane Build System ---
-        # This section defines how to build the `hydra-agent` package.
+        # This section defines how to build the `hydra-mail` package.
         craneLib = crane.mkLib pkgs;
 
         # Common arguments for all crane build steps.
         commonArgs = {
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          src = craneLib.cleanCargoSource (craneLib.path ./hydra-mail);
           buildInputs = sharedBuildInputs;
         } // sharedEnvVars;
 
         # Step 1: Build dependencies only. This is the slow part and gets cached.
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        # Step 2: Build the `hydra-agent` binary itself, using the cached dependencies.
+        # Step 2: Build the `hydra-mail` binary itself, using the cached dependencies.
         # This step is very fast.
-        hydra-agent-pkg = craneLib.buildPackage (commonArgs // {
+        hydra-mail-pkg = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
-          pname = "hydra-agent";
+          pname = "hydra-mail";
         });
 
       in
       {
         # --- Default Package ---
-        # `nix build .` will produce the hydra-agent binary.
-        packages.default = hydra-agent-pkg;
+        # `nix build .` will produce the hydra-mail binary.
+        packages.default = hydra-mail-pkg;
 
         # --- Default App ---
-        # `nix run .` will execute the hydra-agent binary.
+        # `nix run .` will execute the hydra-mail binary.
         apps.default = flake-utils.lib.mkApp {
-          drv = hydra-agent-pkg;
+          drv = hydra-mail-pkg;
         };
 
         # --- Default Check ---
-        # `nix flake check` will run `cargo check`.
-        checks.default = craneLib.checkCargoPackage commonArgs;
+        # `nix flake check` will run `cargo clippy`.
+        checks.default = craneLib.cargoClippy (commonArgs // {
+          inherit cargoArtifacts;
+        });
 
         # --- Development Shell ---
         # `nix develop` will drop you into this shell.
         devShells.default = pkgs.mkShell (sharedEnvVars // {
-          name = "hydra-agent-core-dev";
+          name = "hydra-mail-dev";
 
           # Tools used for BUILDING the project.
           nativeBuildInputs = [

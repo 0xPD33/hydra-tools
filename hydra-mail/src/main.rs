@@ -1,18 +1,18 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use hydra_mail::{config::Config, channels, schema::Pulse, toon::{MessageFormat}};
+use hydra_mail::{config::Config, channels};
 use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
-use std::str::FromStr;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use std::io::Read;
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
-use base64;
-use toon_format::{encode_default, decode_default};
+use base64::{Engine as _, engine::general_purpose};
+use toon_format::{encode, EncodeOptions};
+use toon_format::types::KeyFoldingMode;
 
 #[derive(Parser)]
 #[command(name = "hydra-mail")]
@@ -32,6 +32,9 @@ enum Commands {
     },
     /// Start the persistent daemon
     Start {
+        /// Run in daemon mode (background)
+        #[arg(long)]
+        daemon: bool,
         /// Project path (default: .)
         #[arg(short, long, default_value = ".")]
         project: String,
@@ -50,11 +53,11 @@ enum Commands {
         /// Channel/topic
         #[arg(short, long)]
         channel: String,
-        /// Message format (toon)
+        /// Message format (only 'toon' supported currently)
         #[arg(short = 'F', long, default_value = "toon")]
         format: String,
-        /// Target agent ID for mpsc (optional)
-        #[arg(short, long)]
+        /// Target agent ID (stored in metadata, agents can filter)
+        #[arg(long)]
         target: Option<String>,
     },
     /// Subscribe to a channel
@@ -65,12 +68,9 @@ enum Commands {
         /// Channel/topic
         #[arg(short, long)]
         channel: String,
-        /// Output format (toon)
+        /// Output format (only 'toon' supported currently)
         #[arg(short, long, default_value = "toon")]
         format: String,
-        /// Callback script to pipe output
-        #[arg(short, long)]
-        callback: Option<String>,
         /// Get one message and exit
         #[arg(short, long)]
         once: bool,
@@ -147,21 +147,54 @@ async fn main() -> Result<()> {
             let config = Config::init(project_path)?;
             println!("Hydra initialized in {:?} with UUID: {}", project_path, config.project_uuid);
             println!("Socket path: {:?}", config.socket_path);
+
+            // Generate Skills YAML for Claude integration
+            let skills_dir = hydra_dir.join("skills");
+            fs::create_dir_all(&skills_dir).context("Failed to create skills directory")?;
+            let yaml_path = skills_dir.join("hydra-mail.yaml");
+            fs::write(&yaml_path, config.generate_skill_yaml())
+                .context("Failed to write hydra-mail.yaml")?;
+            println!("✓ Generated .hydra/skills/hydra-mail.yaml");
+
+            // Generate config.sh for shell integration
+            let sh_path = hydra_dir.join("config.sh");
+            fs::write(&sh_path, config.generate_config_sh())
+                .context("Failed to write config.sh")?;
+            fs::set_permissions(&sh_path, fs::Permissions::from_mode(0o755))
+                .context("Failed to set config.sh permissions")?;
+            println!("✓ Generated .hydra/config.sh");
+
+            println!("\n📝 Next steps:");
+            println!("   1. Upload .hydra/skills/hydra-mail.yaml to your Claude session");
+            println!("   2. Use hydra_emit and hydra_subscribe tools in prompts");
+            println!("   3. All messages automatically use TOON encoding (30-60% token savings)");
+
             if daemon {
+                eprintln!("Spawning daemon process...");
+
                 // Copy current binary to .hydra/hydra-daemon for reliable spawn
                 let exe = std::env::current_exe()
-                    .context("Failed to get current executable path")?;
+                    .context("Failed to get current executable path. Is the binary installed correctly?")?;
                 let daemon_binary = hydra_dir.join("hydra-daemon");
                 fs::copy(&exe, &daemon_binary)
                     .context("Failed to copy binary for daemon")?;
                 fs::set_permissions(&daemon_binary, fs::Permissions::from_mode(0o700))
                     .context("Failed to set daemon binary permissions")?;
-                
-                // Spawn daemon using the copied binary
-                let mut child = Command::new(&daemon_binary)
+
+                // Spawn daemon using the copied binary with proper detachment
+                // Note: Don't pass --daemon flag since we're already detaching via stdio
+                // Log stderr to daemon.err for debugging
+                let err_log = hydra_dir.join("daemon.err");
+                let err_file = fs::File::create(&err_log)
+                    .context("Failed to create daemon.err")?;
+
+                let child = Command::new(&daemon_binary)
                     .arg("start")
                     .arg("--project")
                     .arg(".")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(err_file)
                     .spawn()
                     .context("Failed to spawn daemon process")?;
                 let pid = child.id();
@@ -173,39 +206,72 @@ async fn main() -> Result<()> {
                 println!("To start the daemon, run: hydra-mail start");
             }
         }
-        Commands::Start { project } => {
+        Commands::Start { daemon: _, project } => {
             let project_path = Path::new(&project);
             let config = Config::load(project_path)?;
-            println!("Starting daemon for project {:?} (UUID: {}, socket: {:?})", project_path, config.project_uuid, config.socket_path);
-            
+
             // Remove existing socket if present
             let _ = fs::remove_file(&config.socket_path);
-            
+
             let listener = UnixListener::bind(&config.socket_path)
                 .context("Failed to bind Unix socket")?;
-            
+
             // Set socket permissions to 0600
             fs::set_permissions(&config.socket_path, fs::Permissions::from_mode(0o600))
                 .context("Failed to set socket permissions")?;
-            
-            println!("Daemon listening on {:?}", config.socket_path);
-            
+
+            // Write PID file
+            let project_path = std::env::current_dir()?.join(&project);
+            let hydra_dir = project_path.join(".hydra");
+            let pid_file = hydra_dir.join("daemon.pid");
+            fs::write(&pid_file, std::process::id().to_string())
+                .context("Failed to write daemon.pid")?;
+
+            // Run the accepting loop
             loop {
                 let (stream, _) = listener.accept().await?;
-                tokio::spawn(handle_conn(stream, config.project_uuid));
+                let project_uuid = config.project_uuid;
+                tokio::spawn(async move {
+                    if let Err(e) = handle_conn(stream, project_uuid).await {
+                        eprintln!("Connection handler error: {:#}", e);
+                    }
+                });
             }
         }
-        Commands::Emit { project, r#type, data, channel, format, target: _ } => {
+        Commands::Emit { project, r#type, data, channel, format, target } => {
+            // Validate format parameter
+            if format != "toon" {
+                anyhow::bail!("Only 'toon' format is supported (got: {})", format);
+            }
+
+            // Validate channel name
+            if channel.trim().is_empty() {
+                anyhow::bail!("Channel name cannot be empty");
+            }
+
             let project_path = Path::new(&project);
             let config = Config::load(project_path)?;
-            
+
             let mut stream = UnixStream::connect(&config.socket_path)
                 .await
-                .context("Failed to connect to daemon socket. Is the daemon running? Run: hydra-mail start")?;
-            
-            // Read data from stdin if --data not provided
+                .context(format!(
+                    "Failed to connect to daemon socket at {:?}. \
+                    Is the daemon running? Try:\n  \
+                    1. Check status: hydra-mail status\n  \
+                    2. Start daemon: hydra-mail start --daemon",
+                    config.socket_path
+                ))?;
+
+            // Read data from stdin if --data not provided or if --data @-
             let data_json: Value = if let Some(data_str) = data {
-                serde_json::from_str(&data_str).context("Failed to parse --data JSON")?
+                if data_str == "@-" {
+                    // Read from stdin
+                    let mut full_data = String::new();
+                    std::io::stdin().read_to_string(&mut full_data).context("Failed to read stdin")?;
+                    serde_json::from_str(&full_data).context("Failed to parse stdin JSON")?
+                } else {
+                    serde_json::from_str(&data_str).context("Failed to parse --data JSON")?
+                }
             } else {
                 // Read stdin synchronously (stdin is blocking anyway)
                 let mut full_data = String::new();
@@ -213,22 +279,45 @@ async fn main() -> Result<()> {
                 serde_json::from_str(&full_data).context("Failed to parse stdin JSON")?
             };
 
-            // Create a Pulse with the provided data
-            let pulse = Pulse::new(r#type, channel.clone(), data_json);
+            // Build Pulse JSON directly and encode to TOON (skip Pulse struct)
+            let pulse_json = if let Some(target_id) = target {
+                json!({
+                    "id": Uuid::new_v4(),
+                    "timestamp": chrono::Utc::now(),
+                    "type": r#type,
+                    "channel": channel.clone(),
+                    "data": data_json,
+                    "metadata": json!({"target": target_id})
+                })
+            } else {
+                json!({
+                    "id": Uuid::new_v4(),
+                    "timestamp": chrono::Utc::now(),
+                    "type": r#type,
+                    "channel": channel.clone(),
+                    "data": data_json,
+                    "metadata": null
+                })
+            };
 
-            // Validate pulse size
-            pulse.validate_size().context("Pulse validation failed")?;
+            // Encode directly to TOON with key folding
+            let encode_opts = EncodeOptions::new()
+                .with_key_folding(KeyFoldingMode::Safe);
+            let toon_str = encode(&pulse_json, &encode_opts)
+                .context("Failed to encode to TOON")?;
 
-            // Always encode as TOON
-            let toon_str = encode_default(&pulse)
-                .context("Failed to encode pulse as TOON")?;
+            // Basic size validation (1KB max)
+            if toon_str.len() > 1024 {
+                anyhow::bail!("Message too large: {} bytes (max 1KB)", toon_str.len());
+            }
+
             let encoded_data = toon_str.into_bytes();
 
             let cmd_json = json!({
                 "cmd": "emit",
                 "channel": channel,
                 "format": "toon",
-                "data": base64::encode(&encoded_data)
+                "data": general_purpose::STANDARD.encode(&encoded_data)
             });
 
             let cmd_str = serde_json::to_string(&cmd_json).context("Failed to serialize command")?;
@@ -251,13 +340,29 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Subscribe { project, channel, format: _, callback: _, once } => {
+        Commands::Subscribe { project, channel, format, once } => {
+            // Validate format parameter
+            if format != "toon" {
+                anyhow::bail!("Only 'toon' format is supported (got: {})", format);
+            }
+
+            // Validate channel name
+            if channel.trim().is_empty() {
+                anyhow::bail!("Channel name cannot be empty");
+            }
+
             let project_path = Path::new(&project);
             let config = Config::load(project_path)?;
             
             let mut stream = UnixStream::connect(&config.socket_path)
                 .await
-                .context("Failed to connect to daemon socket. Is the daemon running? Run: hydra-mail start")?;
+                .context(format!(
+                    "Failed to connect to daemon socket at {:?}. \
+                    Is the daemon running? Try:\n  \
+                    1. Check status: hydra-mail status\n  \
+                    2. Start daemon: hydra-mail start --daemon",
+                    config.socket_path
+                ))?;
             
             let (reader_side, mut writer) = stream.split();
             let mut reader = BufReader::new(reader_side).lines();
@@ -405,48 +510,35 @@ async fn handle_conn(mut stream: UnixStream, project_uuid: Uuid) -> Result<()> {
             Some("emit") => {
                 let channel = cmd["channel"].as_str().context("Missing channel")?.to_string();
 
-                // Get the base64 encoded TOON data
+                // Get the base64 encoded TOON data and store as-is (no decode needed!)
                 let encoded_data = cmd["data"].as_str().context("Missing data")?;
-                let decoded_bytes = base64::decode(encoded_data)
+                let decoded_bytes = general_purpose::STANDARD.decode(encoded_data)
                     .context("Failed to decode base64 data")?;
 
-                // Decode the TOON pulse
+                // Just validate UTF-8, but don't decode TOON
                 let toon_str = String::from_utf8(decoded_bytes)
                     .context("Invalid UTF-8 in TOON data")?;
-                let json_value = decode_default(&toon_str)
-                    .context("Failed to decode TOON pulse")?;
-                let pulse: Pulse = serde_json::from_value(json_value)
-                    .context("Failed to convert TOON JSON to Pulse")?;
 
-                // Validate the pulse
-                pulse.validate_size().context("Pulse validation failed")?;
-
-                // Use the original TOON data for internal storage (no re-encoding needed)
-                let internal_data = toon_str.into_bytes();
-
-                let tx = channels::get_or_create_broadcast_tx(project_uuid, &channel).await;
-                // Broadcast send returns Ok(n) where n is number of receivers (can be 0)
-                // or Err if channel is closed. For pub/sub, 0 receivers is fine.
-                match tx.send(String::from_utf8_lossy(&internal_data).to_string()) {
-                    Ok(_) => {
-                        let ok_resp = json!({"status": "ok", "format": "toon", "size": internal_data.len()});
-                        writer.write_all(ok_resp.to_string().as_bytes()).await?;
-                        writer.write_all(b"\n").await?;
-                    }
-                    Err(e) => {
-                        let err_resp = json!({"status": "error", "msg": format!("Failed to send to channel: {}", e)});
-                        writer.write_all(err_resp.to_string().as_bytes()).await?;
-                        writer.write_all(b"\n").await?;
-                    }
-                }
+                // Emit and store in replay buffer atomically (daemon just passes through TOON)
+                let toon_size = toon_str.len();
+                let receiver_count = channels::emit_and_store(project_uuid, &channel, toon_str).await;
+                let ok_resp = json!({"status": "ok", "format": "toon", "size": toon_size, "receivers": receiver_count});
+                writer.write_all(ok_resp.to_string().as_bytes()).await?;
+                writer.write_all(b"\n").await?;
+                writer.flush().await?;
             }
             Some("subscribe") => {
                 let channel = cmd["channel"].as_str().context("Missing channel")?.to_string();
 
-                let mut rx = channels::subscribe_broadcast(project_uuid, &channel).await;
+                let (mut rx, history) = channels::subscribe_broadcast(project_uuid, &channel).await;
 
-                // Stream messages until connection closes or error
-                // Messages are already stored as TOON internally, just send them directly
+                // Send history first (messages already in TOON format)
+                for msg in history {
+                    writer.write_all(msg.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                }
+
+                // Then stream live messages until connection closes or error
                 while let Ok(msg) = rx.recv().await {
                     writer.write_all(msg.as_bytes()).await?;
                     writer.write_all(b"\n").await?;
@@ -456,6 +548,7 @@ async fn handle_conn(mut stream: UnixStream, project_uuid: Uuid) -> Result<()> {
                 let err_resp = json!({"status": "error", "msg": "Unknown command"});
                 writer.write_all(err_resp.to_string().as_bytes()).await?;
                 writer.write_all(b"\n").await?;
+                writer.flush().await?;
             }
         }
     }
