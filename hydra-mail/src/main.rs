@@ -202,6 +202,19 @@ async fn main() -> Result<()> {
                 fs::write(&pid_path, pid.to_string().as_bytes())
                     .context("Failed to write daemon.pid")?;
                 println!("Daemon spawned with PID: {}", pid);
+
+                // Wait for socket to be created (up to 2 seconds)
+                let socket_path = &config.socket_path;
+                let mut attempts = 0;
+                while !socket_path.exists() && attempts < 20 {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    attempts += 1;
+                }
+                if !socket_path.exists() {
+                    eprintln!("Warning: Daemon socket not created after 2s. Check {:?}", hydra_dir.join("daemon.err"));
+                } else {
+                    println!("Daemon ready at {:?}", socket_path);
+                }
             } else {
                 println!("To start the daemon, run: hydra-mail start");
             }
@@ -265,17 +278,33 @@ async fn main() -> Result<()> {
             // Read data from stdin if --data not provided or if --data @-
             let data_json: Value = if let Some(data_str) = data {
                 if data_str == "@-" {
-                    // Read from stdin
-                    let mut full_data = String::new();
-                    std::io::stdin().read_to_string(&mut full_data).context("Failed to read stdin")?;
+                    // Read from stdin with size limit (100KB max)
+                    use tokio::io::AsyncReadExt;
+                    let mut stdin = tokio::io::stdin();
+                    let mut buffer = Vec::with_capacity(102400);
+                    let bytes_read = stdin.take(102400).read_to_end(&mut buffer).await
+                        .context("Failed to read stdin")?;
+                    if bytes_read == 102400 {
+                        anyhow::bail!("Stdin data too large (>100KB)");
+                    }
+                    let full_data = String::from_utf8(buffer)
+                        .context("Invalid UTF-8 in stdin")?;
                     serde_json::from_str(&full_data).context("Failed to parse stdin JSON")?
                 } else {
                     serde_json::from_str(&data_str).context("Failed to parse --data JSON")?
                 }
             } else {
-                // Read stdin synchronously (stdin is blocking anyway)
-                let mut full_data = String::new();
-                std::io::stdin().read_to_string(&mut full_data).context("Failed to read stdin")?;
+                // Read stdin with size limit (100KB max)
+                use tokio::io::AsyncReadExt;
+                let mut stdin = tokio::io::stdin();
+                let mut buffer = Vec::with_capacity(102400);
+                let bytes_read = stdin.take(102400).read_to_end(&mut buffer).await
+                    .context("Failed to read stdin")?;
+                if bytes_read == 102400 {
+                    anyhow::bail!("Stdin data too large (>100KB)");
+                }
+                let full_data = String::from_utf8(buffer)
+                    .context("Invalid UTF-8 in stdin")?;
                 serde_json::from_str(&full_data).context("Failed to parse stdin JSON")?
             };
 
@@ -306,9 +335,9 @@ async fn main() -> Result<()> {
             let toon_str = encode(&pulse_json, &encode_opts)
                 .context("Failed to encode to TOON")?;
 
-            // Basic size validation (1KB max)
-            if toon_str.len() > 1024 {
-                anyhow::bail!("Message too large: {} bytes (max 1KB)", toon_str.len());
+            // Basic size validation (10KB max)
+            if toon_str.len() > 10240 {
+                anyhow::bail!("Message too large: {} bytes (max 10KB)", toon_str.len());
             }
 
             let encoded_data = toon_str.into_bytes();
@@ -332,8 +361,11 @@ async fn main() -> Result<()> {
             let mut reader = BufReader::new(reader_side).lines();
             if let Some(resp_line) = reader.next_line().await.context("Failed to read response")? {
                 let resp: Value = serde_json::from_str(&resp_line).context("Failed to parse response")?;
-                if resp["status"] == "error" {
-                    eprintln!("Emit failed: {}", resp["msg"].as_str().unwrap_or("Unknown error"));
+                if resp.get("status").and_then(|s| s.as_str()) == Some("error") {
+                    let error_msg = resp.get("msg")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("Unknown error (missing or invalid 'msg' field)");
+                    eprintln!("Emit failed: {}", error_msg);
                     std::process::exit(1);
                 } else {
                     println!("Emit successful");
@@ -460,25 +492,28 @@ async fn main() -> Result<()> {
         Commands::Stop { project } => {
             let project_path = Path::new(&project);
             let hydra_dir = project_path.join(".hydra");
-            
+
+            // Load config to get socket path
+            let config = Config::load(project_path)?;
+
             // Read PID
             let pid_path = hydra_dir.join("daemon.pid");
             if !pid_path.exists() {
                 println!("No daemon.pid found in {:?}. Daemon not running?", project_path);
                 return Ok(());
             }
-            
+
             let pid_str = fs::read_to_string(&pid_path)
                 .context("Failed to read daemon.pid")?;
             let pid: u32 = pid_str.trim().parse()
                 .context("Invalid PID in daemon.pid")?;
-            
+
             // Kill the process
             let kill_output = Command::new("kill")
                 .arg("-TERM")
                 .arg(pid.to_string())
                 .output();
-            
+
             match kill_output {
                 Ok(output) if output.status.success() => {
                     println!("Daemon (PID: {}) terminated gracefully", pid);
@@ -487,11 +522,11 @@ async fn main() -> Result<()> {
                     println!("Daemon (PID: {}) may not be running or already terminated", pid);
                 }
             }
-            
-            // Clean up files
+
+            // Clean up files using config socket path
             let _ = fs::remove_file(&pid_path);
-            let _ = fs::remove_file(hydra_dir.join("hydra-daemon"));
-            let _ = fs::remove_file(hydra_dir.join("hydra.sock"));
+            let _ = fs::remove_file(&config.socket_path);
+            let _ = fs::remove_file(hydra_dir.join("daemon.err"));
             println!("Cleaned up daemon files in {:?}", project_path);
         }
     }

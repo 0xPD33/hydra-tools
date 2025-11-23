@@ -72,22 +72,19 @@ pub async fn emit_and_store(project_uuid: Uuid, topic: &str, message: String) ->
 /// Subscribe to a broadcast channel and get message history
 pub async fn subscribe_broadcast(project_uuid: Uuid, topic: &str) -> (broadcast::Receiver<String>, Vec<String>) {
     let key = (project_uuid, topic.to_string());
-    let map = BROADCAST_CHANNELS.lock().await;
+    let mut map = BROADCAST_CHANNELS.lock().await;
 
-    match map.get(&key) {
-        Some((tx, buffer)) => {
-            let rx = tx.subscribe();
-            let history = buffer.get_all();
-            (rx, history)
-        }
-        None => {
-            // Channel doesn't exist yet - create it but no history
-            drop(map); // Release lock before calling get_or_create
-            let tx = get_or_create_broadcast_tx(project_uuid, topic).await;
-            let rx = tx.subscribe();
-            (rx, Vec::new())
-        }
-    }
+    // Use entry API to atomically get-or-create
+    let (tx, buffer) = map.entry(key)
+        .or_insert_with(|| {
+            let (tx, _rx) = broadcast::channel(1024);
+            let buffer = ReplayBuffer::new(100);
+            (tx, buffer)
+        });
+
+    let rx = tx.subscribe();
+    let history = buffer.get_all();
+    (rx, history)
 }
 
 // List active channels for a project
