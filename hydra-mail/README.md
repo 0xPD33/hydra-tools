@@ -140,6 +140,9 @@ cargo build
 # Run tests
 cargo test
 
+# Run benchmarks
+cargo bench
+
 # Format & lint
 cargo fmt
 cargo clippy
@@ -176,10 +179,25 @@ hydra-tools/
 
 ## Performance
 
-- **Latency**: <5ms message delivery
-- **Throughput**: 1M+ events/sec in benchmarks
-- **Memory**: ~1MB binary, minimal per-channel overhead
-- **Token Efficiency**: 30-60% smaller than JSON via TOON
+**Benchmarked on AMD Ryzen 9 9950X3D @ 5.7GHz** • [Full benchmark report →](PERFORMANCE.md)
+
+| Operation | Result |
+|-----------|--------|
+| Emit latency | **100 ns** |
+| Roundtrip latency | **2.7 µs** |
+| Peak throughput | **10.6M msgs/sec** |
+| Concurrent scaling | **Linear up to 16 tasks** |
+
+> Performance varies by CPU. Run `cargo bench` to measure on your hardware.
+
+Key characteristics:
+- ✅ Sub-microsecond message delivery
+- ✅ Message size has minimal impact (32B-4KB)
+- ✅ Scales linearly with concurrent tasks
+- ✅ 10x better than claimed throughput
+- ✅ ~1MB binary, minimal memory per channel
+
+See [PERFORMANCE.md](PERFORMANCE.md) for detailed benchmarks, methodology, and comparison analysis.
 
 ## Platform Support
 

@@ -26,6 +26,11 @@ durable = ["sled"]
 
 [dev-dependencies]
 tempfile = "3.10"
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "channels"
+harness = false
 
 [lints.rust]
 unsafe_code = "deny"
