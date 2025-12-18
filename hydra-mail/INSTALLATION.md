@@ -269,7 +269,7 @@ After installation:
 1. Read [.claude-plugin/README.md](.claude-plugin/README.md) for plugin usage guide
 2. Check [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for design details
 3. See [CLAUDE.md](CLAUDE.md) for project-specific guidance
-4. Try the [tmux demo](tests/tmux_demo.sh) for interactive testing
+4. Run integration tests: `cargo test --release`
 
 ## Support
 

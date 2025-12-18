@@ -5,6 +5,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use crate::constants::HYDRA_DIR_PERMISSIONS;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -17,7 +18,7 @@ impl Config {
     pub fn init(project_root: &Path) -> Result<Self> {
         let hydra_dir = project_root.join(".hydra");
         fs::create_dir_all(&hydra_dir).context("Failed to create .hydra directory")?;
-        fs::set_permissions(&hydra_dir, fs::Permissions::from_mode(0o700))
+        fs::set_permissions(&hydra_dir, fs::Permissions::from_mode(HYDRA_DIR_PERMISSIONS))
             .context("Failed to set .hydra permissions")?;
 
         let project_uuid = Uuid::new_v4();

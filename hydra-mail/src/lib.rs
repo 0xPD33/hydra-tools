@@ -1,7 +1,10 @@
 pub mod config;
 pub mod channels;
-pub mod schema;
-pub mod toon;
+pub mod constants;
+
+// Removed modules (dead code):
+// - schema: Pulse struct was never used, main.rs builds JSON directly
+// - toon: MessageFormat enum was never used, main.rs does string comparison
 
 // Future modules (commented to avoid missing file errors)
 // pub mod broadcast;

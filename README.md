@@ -2,9 +2,23 @@
 
 A collection of Rust tools for multi-agent coordination and collaboration.
 
+## Quick Start
+
+**hydra-mail is the foundation** - most other tools depend on it for coordination. Start here:
+
+```bash
+# Install hydra-mail first
+nix build .#hydra-mail
+./result/bin/hydra-mail init --daemon
+
+# Then add other tools as needed
+nix build .#hydra-wt
+nix build .#hydra-observer
+```
+
 ## Projects
 
-### [hydra-mail](hydra-mail/)
+### [hydra-mail](hydra-mail/) (Core)
 
 Lightweight in-memory pub/sub messaging system with TOON encoding for token-efficient agent communication.
 
@@ -14,55 +28,97 @@ Lightweight in-memory pub/sub messaging system with TOON encoding for token-effi
 - 📼 Replay buffer - Last 100 messages per channel
 - 🎯 Zero dependencies - Pure Rust, no external brokers
 
-**Status**: v0.1.0 (Phase 1 - Skills MVP)
+**Status**: v0.1.0 | **Required by**: hydra-wt, hydra-observer (optional)
 
-**Links**:
-- [hydra-mail README](hydra-mail/README.md) - Project overview
-- [Installation Guide](hydra-mail/INSTALLATION.md) - Setup instructions
-- [Architecture](hydra-mail/docs/ARCHITECTURE.md) - Design details
-- [Specification](hydra-mail/docs/SPEC.md) - Full spec and roadmap
+### [hydra-wt](hydra-wt/) (Worktree Manager)
 
-## Getting Started
+Worktree management for parallel development with automatic port allocation and environment templating.
 
-Each project has its own README. Start with the project you're interested in:
+- 🌳 Git worktree management - Create/remove with one command
+- 🔌 Automatic port allocation - Each worktree gets a unique port
+- 📝 Environment templating - Generate `.env.local` per worktree
+- 📡 Hydra Mail integration - Emit events to `sys:registry` channel
 
-```bash
-cd hydra-mail
-cat README.md
+**Status**: v0.1.0 | **Requires**: hydra-mail
+
+### [hydra-observer](hydra-observer/) (Desktop Mascot)
+
+Animated desktop mascot that follows your cursor and reacts to your work environment.
+
+- 👁️ Cursor tracking - Eyes follow your mouse
+- 😊 Context reactions - Blushes near terminals
+- 🖱️ Interactive - Drag and drop, window attachment
+- 🎨 GPU rendered - wgpu with custom shaders
+
+**Status**: v0.1.0 | **Requires**: hydra-mail (optional, for coordination awareness)
+
+## Dependency Graph
+
+```
+┌─────────────────────────────────────────────────┐
+│                 hydra-mail                       │
+│            (pub/sub backbone)                    │
+└─────────────────┬───────────────────────────────┘
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+        ▼                   ▼
+┌───────────────┐   ┌───────────────┐
+│   hydra-wt    │   │hydra-observer │
+│  (worktrees)  │   │   (mascot)    │
+│   REQUIRED    │   │   OPTIONAL    │
+└───────────────┘   └───────────────┘
 ```
 
 ## Building
 
-### All Projects
+### With Nix (Recommended)
+
 ```bash
-nix build .#all
-# or
-cargo build --release -p hydra-mail
+# Build specific package
+nix build .#hydra-mail
+nix build .#hydra-wt
+nix build .#hydra-observer
+
+# Enter development shell
+nix develop
 ```
 
-### Specific Project
+### With Cargo
+
 ```bash
-cd hydra-mail
-nix build
-# or
-cargo build --release
+# From each project directory
+cd hydra-mail && cargo build --release
+cd hydra-wt && cargo build --release
+cd hydra-observer && cargo build --release
 ```
 
 ## Repository Structure
 
 ```
 hydra-tools/
-├── hydra-mail/           # Main project (pub/sub messaging)
+├── hydra-mail/           # Core pub/sub messaging
 │   ├── src/
-│   ├── tests/
-│   ├── skills/
 │   ├── docs/
 │   ├── .claude-plugin/
-│   ├── README.md         # Project-specific README
-│   ├── Cargo.toml
-│   └── ...
-└── README.md             # This file (monorepo overview)
+│   └── README.md
+├── hydra-wt/             # Worktree manager
+│   ├── src/
+│   └── README.md
+├── hydra-observer/       # Desktop mascot
+│   ├── src/
+│   └── docs/
+├── flake.nix             # Nix build definitions
+└── README.md             # This file
 ```
+
+## Documentation
+
+| Project | README | Developer Guide |
+|---------|--------|-----------------|
+| hydra-mail | [README](hydra-mail/README.md) | [CLAUDE.md](hydra-mail/CLAUDE.md) |
+| hydra-wt | [README](hydra-wt/README.md) | [CLAUDE.md](hydra-wt/CLAUDE.md) |
+| hydra-observer | [README](hydra-observer/README.md) | [docs/](hydra-observer/docs/) |
 
 ## License
 
@@ -70,4 +126,4 @@ MIT - See individual projects for details.
 
 ## Contributing
 
-Issues and PRs welcome. See [0xPD33/hydra-tools](https://github.com/0xPD33/hydra-tools)
+Issues and PRs welcome at [0xPD33/hydra-tools](https://github.com/0xPD33/hydra-tools)

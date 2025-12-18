@@ -3,6 +3,7 @@ use std::sync::Arc;
 use once_cell::sync::Lazy;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+use crate::constants::{REPLAY_BUFFER_CAPACITY, BROADCAST_CHANNEL_CAPACITY};
 
 /// Stores the last N messages per channel for late subscribers.
 /// Uses a ring buffer (VecDeque) to maintain constant memory usage.
@@ -42,8 +43,8 @@ pub async fn get_or_create_broadcast_tx(project_uuid: Uuid, topic: &str) -> broa
     // which keeps the channel open. We clone the sender to return.
     let (tx, _buffer) = map.entry(key.clone())
         .or_insert_with(|| {
-            let (tx, _rx) = broadcast::channel(1024);
-            let buffer = ReplayBuffer::new(100); // Store last 100 messages
+            let (tx, _rx) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+            let buffer = ReplayBuffer::new(REPLAY_BUFFER_CAPACITY);
             (tx, buffer)
         });
     tx.clone()
@@ -53,37 +54,58 @@ pub async fn get_or_create_broadcast_tx(project_uuid: Uuid, topic: &str) -> broa
 /// Returns the number of receivers that received the message (0 if no active receivers)
 pub async fn emit_and_store(project_uuid: Uuid, topic: &str, message: String) -> usize {
     let key = (project_uuid, topic.to_string());
-    let mut map = BROADCAST_CHANNELS.lock().await;
 
-    let (tx, buffer) = map.entry(key.clone())
-        .or_insert_with(|| {
-            let (tx, _rx) = broadcast::channel(1024);
-            let buffer = ReplayBuffer::new(100);
-            (tx, buffer)
-        });
+    // Clone message and get sender outside the critical section to reduce lock time
+    let message_clone = message.clone();
+    let sender = {
+        let mut map = BROADCAST_CHANNELS.lock().await;
+        let (tx, buffer) = map.entry(key.clone())
+            .or_insert_with(|| {
+                let (tx, _rx) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+                let buffer = ReplayBuffer::new(REPLAY_BUFFER_CAPACITY);
+                (tx, buffer)
+            });
 
-    // Store in replay buffer first (always succeeds)
-    buffer.push(message.clone());
+        // Store in replay buffer (always succeeds)
+        buffer.push(message_clone);
 
-    // Then broadcast - if there are no receivers, that's OK, we stored it
-    tx.send(message).unwrap_or(0)
+        // Clone sender to use outside lock
+        tx.clone()
+    };
+    // Lock released here
+
+    // Broadcast outside the lock - if there are no receivers, that's OK, we stored it
+    sender.send(message).unwrap_or(0)
 }
 
 /// Subscribe to a broadcast channel and get message history
+///
+/// IMPORTANT: Gets history BEFORE subscribing to avoid race condition where messages
+/// emitted between subscribe and get_history appear in both live stream and history (duplicates).
 pub async fn subscribe_broadcast(project_uuid: Uuid, topic: &str) -> (broadcast::Receiver<String>, Vec<String>) {
     let key = (project_uuid, topic.to_string());
-    let mut map = BROADCAST_CHANNELS.lock().await;
 
-    // Use entry API to atomically get-or-create
-    let (tx, buffer) = map.entry(key)
-        .or_insert_with(|| {
-            let (tx, _rx) = broadcast::channel(1024);
-            let buffer = ReplayBuffer::new(100);
-            (tx, buffer)
-        });
+    // Get history and receiver atomically with minimal lock time
+    let (rx, history) = {
+        let mut map = BROADCAST_CHANNELS.lock().await;
 
-    let rx = tx.subscribe();
-    let history = buffer.get_all();
+        // Use entry API to atomically get-or-create
+        let (tx, buffer) = map.entry(key)
+            .or_insert_with(|| {
+                let (tx, _rx) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+                let buffer = ReplayBuffer::new(REPLAY_BUFFER_CAPACITY);
+                (tx, buffer)
+            });
+
+        // Get history FIRST, then subscribe
+        // This ensures messages don't appear in both history and live stream
+        let history = buffer.get_all();
+        let rx = tx.subscribe();
+
+        (rx, history)
+    };
+    // Lock released here
+
     (rx, history)
 }
 

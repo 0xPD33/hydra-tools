@@ -1,5 +1,5 @@
 {
-  description = "Hydra Agent development environment";
+  description = "Hydra Tools - Agent utilities (hydra-mail, hydra-observer, hydra-wt)";
 
   # --- Inputs ---
   # These are the external dependencies for our development environment.
@@ -40,20 +40,21 @@
         # This ensures every developer uses the exact same Rust version.
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
-        # --- Shared Dependencies ---
-        # Common dependencies used by both build and development environments.
-        sharedBuildInputs = [
+        # --- Crane Build System ---
+        craneLib = crane.mkLib pkgs;
+
+        # ============================================================
+        # HYDRA-MAIL
+        # ============================================================
+        mailBuildInputs = [
           pkgs.openssl
           pkgs.sqlite
           pkgs.pkg-config
         ] ++ lib.optionals pkgs.stdenv.isDarwin [
-          # Add macOS specific build dependencies here if needed.
           pkgs.libiconv
         ];
 
-        # --- Shared Environment Variables ---
-        # Common environment configuration for both build and development.
-        sharedEnvVars = {
+        mailEnvVars = {
           LD_LIBRARY_PATH = lib.makeLibraryPath [
             pkgs.openssl
             pkgs.sqlite
@@ -65,86 +66,159 @@
           ) + "/openssl";
         };
 
-        # --- Crane Build System ---
-        # This section defines how to build the `hydra-mail` package.
-        craneLib = crane.mkLib pkgs;
-
-        # Common arguments for all crane build steps.
-        commonArgs = {
+        mailCommonArgs = {
           src = craneLib.cleanCargoSource (craneLib.path ./hydra-mail);
-          buildInputs = sharedBuildInputs;
-        } // sharedEnvVars;
+          buildInputs = mailBuildInputs;
+        } // mailEnvVars;
 
-        # Step 1: Build dependencies only. This is the slow part and gets cached.
-        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        mailCargoArtifacts = craneLib.buildDepsOnly mailCommonArgs;
 
-        # Step 2: Build the `hydra-mail` binary itself, using the cached dependencies.
-        # This step is very fast.
-        hydra-mail-pkg = craneLib.buildPackage (commonArgs // {
-          inherit cargoArtifacts;
+        hydra-mail-pkg = craneLib.buildPackage (mailCommonArgs // {
+          cargoArtifacts = mailCargoArtifacts;
           pname = "hydra-mail";
+        });
+
+        # ============================================================
+        # HYDRA-OBSERVER
+        # ============================================================
+        observerBuildInputs = [
+          pkgs.pkg-config
+          # Wayland
+          pkgs.wayland
+          pkgs.wayland-protocols
+          pkgs.libxkbcommon
+          # Vulkan/GPU
+          pkgs.vulkan-loader
+          pkgs.vulkan-headers
+          pkgs.shaderc
+          # X11 fallback
+          pkgs.xorg.libX11
+          pkgs.xorg.libXcursor
+          pkgs.xorg.libXrandr
+          pkgs.xorg.libXi
+          pkgs.xorg.libxcb
+        ] ++ lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.libiconv
+        ];
+
+        observerEnvVars = {
+          LD_LIBRARY_PATH = lib.makeLibraryPath ([
+            pkgs.wayland
+            pkgs.libxkbcommon
+            pkgs.vulkan-loader
+            pkgs.xorg.libX11
+            pkgs.xorg.libXcursor
+            pkgs.xorg.libXrandr
+            pkgs.xorg.libXi
+            pkgs.xorg.libxcb
+          ]);
+          VULKAN_SDK = "${pkgs.vulkan-headers}";
+          VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+        };
+
+        observerCommonArgs = {
+          src = craneLib.cleanCargoSource (craneLib.path ./hydra-observer);
+          buildInputs = observerBuildInputs;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+        } // observerEnvVars;
+
+        observerCargoArtifacts = craneLib.buildDepsOnly observerCommonArgs;
+
+        hydra-observer-pkg = craneLib.buildPackage (observerCommonArgs // {
+          cargoArtifacts = observerCargoArtifacts;
+          pname = "hydra-observer";
+        });
+
+        # ============================================================
+        # HYDRA-WT (Worktree Manager)
+        # ============================================================
+        wtCommonArgs = {
+          src = craneLib.cleanCargoSource (craneLib.path ./hydra-wt);
+          buildInputs = lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.libiconv
+          ];
+        };
+
+        wtCargoArtifacts = craneLib.buildDepsOnly wtCommonArgs;
+
+        hydra-wt-pkg = craneLib.buildPackage (wtCommonArgs // {
+          cargoArtifacts = wtCargoArtifacts;
+          pname = "hydra-wt";
         });
 
       in
       {
-        # --- Default Package ---
-        # `nix build .` will produce the hydra-mail binary.
-        packages.default = hydra-mail-pkg;
-
-        # --- Default App ---
-        # `nix run .` will execute the hydra-mail binary.
-        apps.default = flake-utils.lib.mkApp {
-          drv = hydra-mail-pkg;
+        # --- Packages ---
+        packages = {
+          default = hydra-mail-pkg;
+          hydra-mail = hydra-mail-pkg;
+          hydra-observer = hydra-observer-pkg;
+          hydra-wt = hydra-wt-pkg;
         };
 
-        # --- Default Check ---
-        # `nix flake check` will run `cargo clippy`.
-        checks.default = craneLib.cargoClippy (commonArgs // {
-          inherit cargoArtifacts;
-        });
+        # --- Apps ---
+        apps = {
+          default = flake-utils.lib.mkApp { drv = hydra-mail-pkg; };
+          hydra-mail = flake-utils.lib.mkApp { drv = hydra-mail-pkg; };
+          hydra-observer = flake-utils.lib.mkApp { drv = hydra-observer-pkg; };
+          hydra-wt = flake-utils.lib.mkApp { drv = hydra-wt-pkg; };
+        };
+
+        # --- Checks ---
+        checks = {
+          hydra-mail = craneLib.cargoClippy (mailCommonArgs // {
+            cargoArtifacts = mailCargoArtifacts;
+          });
+          hydra-observer = craneLib.cargoClippy (observerCommonArgs // {
+            cargoArtifacts = observerCargoArtifacts;
+          });
+          hydra-wt = craneLib.cargoClippy (wtCommonArgs // {
+            cargoArtifacts = wtCargoArtifacts;
+          });
+        };
 
         # --- Development Shell ---
-        # `nix develop` will drop you into this shell.
-        devShells.default = pkgs.mkShell (sharedEnvVars // {
-          name = "hydra-mail-dev";
+        # `nix develop` will drop you into this shell with all dependencies.
+        devShells.default = pkgs.mkShell (mailEnvVars // observerEnvVars // {
+          name = "hydra-tools-dev";
 
-          # Tools used for BUILDING the project.
           nativeBuildInputs = [
-            # The full Rust toolchain with cargo, clippy, etc.
             toolchain
-
-            # C compiler and build tools required by some Rust crates.
             pkgs.pkg-config
             pkgs.clang
             pkgs.cmake
-          ]
-            # Use the 'mold' linker on Linux for much faster link times.
-            ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.mold ];
+          ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.mold ];
 
-          # Tools and libraries available at RUNTIME inside the shell.
-          buildInputs = sharedBuildInputs ++ [
-            # Code parsing tools.
+          buildInputs = mailBuildInputs ++ observerBuildInputs ++ [
             pkgs.tree-sitter
-
-            # Packaging tools.
             pkgs.cargo-dist
-
-            # General purpose CLI tools for a better developer experience.
             pkgs.jq
             pkgs.fd
             pkgs.ripgrep
             pkgs.bat
           ];
 
-          # Environment variables for the development shell.
+          LD_LIBRARY_PATH = lib.makeLibraryPath ([
+            pkgs.openssl
+            pkgs.sqlite
+            pkgs.wayland
+            pkgs.libxkbcommon
+            pkgs.vulkan-loader
+            pkgs.xorg.libX11
+            pkgs.xorg.libXcursor
+            pkgs.xorg.libXrandr
+            pkgs.xorg.libXi
+            pkgs.xorg.libxcb
+          ]);
+
           shellHook = ''
-            # Make rust-analyzer work seamlessly.
             export RUST_SRC_PATH="${toolchain}/lib/rustlib/src/rust/library"
             export RUST_BACKTRACE=1
+            export VK_LAYER_PATH="${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d"
 
-            echo "--- Hydra Agent Core Environment ---"
-            echo "Rust toolchain and all dependencies are now available."
-            echo "Run 'cargo build' or 'cargo run' to get started."
+            echo "--- Hydra Tools Development Environment ---"
+            echo "Available packages: hydra-mail, hydra-observer, hydra-wt"
+            echo "Build with: nix build .#hydra-mail (or hydra-observer, hydra-wt)"
           '';
         });
       });
