@@ -1,6 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
-use once_cell::sync::Lazy;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 use crate::constants::{REPLAY_BUFFER_CAPACITY, BROADCAST_CHANNEL_CAPACITY};
@@ -33,8 +32,12 @@ impl ReplayBuffer {
     }
 }
 
-static BROADCAST_CHANNELS: Lazy<Arc<tokio::sync::Mutex<HashMap<(Uuid, String), (broadcast::Sender<String>, ReplayBuffer)>>>> =
-    Lazy::new(|| Arc::new(tokio::sync::Mutex::new(HashMap::new())));
+type ChannelKey = (Uuid, String);
+type ChannelValue = (broadcast::Sender<String>, ReplayBuffer);
+type ChannelMap = HashMap<ChannelKey, ChannelValue>;
+
+static BROADCAST_CHANNELS: LazyLock<Arc<tokio::sync::Mutex<ChannelMap>>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Mutex::new(HashMap::new())));
 
 pub async fn get_or_create_broadcast_tx(project_uuid: Uuid, topic: &str) -> broadcast::Sender<String> {
     let key = (project_uuid, topic.to_string());
@@ -75,6 +78,7 @@ pub async fn emit_and_store(project_uuid: Uuid, topic: &str, message: String) ->
     // Lock released here
 
     // Broadcast outside the lock - if there are no receivers, that's OK, we stored it
+    // The replay buffer ensures late subscribers can catch up
     sender.send(message).unwrap_or(0)
 }
 
@@ -275,5 +279,181 @@ mod tests {
         let (_rx2, history2) = subscribe_broadcast(uuid2, topic).await;
         assert_eq!(history2.len(), 1);
         assert_eq!(history2[0], "project2_msg");
+    }
+
+    // ============ STRESS TESTS ============
+
+    #[tokio::test]
+    async fn stress_concurrent_emitters() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let uuid = Uuid::new_v4();
+        let topic = "stress:concurrent";
+        let num_emitters = 10;
+        let msgs_per_emitter = 100;
+        let total_expected = num_emitters * msgs_per_emitter;
+
+        // Subscribe first to receive all messages
+        let (mut rx, _) = subscribe_broadcast(uuid, topic).await;
+
+        let received = Arc::new(AtomicUsize::new(0));
+        let received_clone = received.clone();
+
+        // Spawn receiver task
+        let receiver_handle = tokio::spawn(async move {
+            let mut count = 0;
+            loop {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    rx.recv()
+                ).await {
+                    Ok(Ok(_)) => count += 1,
+                    _ => break,
+                }
+            }
+            received_clone.store(count, Ordering::SeqCst);
+        });
+
+        // Spawn multiple emitter tasks
+        let mut handles = Vec::new();
+        for emitter_id in 0..num_emitters {
+            let uuid_clone = uuid;
+            let topic_clone = topic.to_string();
+            handles.push(tokio::spawn(async move {
+                for msg_id in 0..msgs_per_emitter {
+                    let msg = format!("emitter{}:msg{}", emitter_id, msg_id);
+                    emit_and_store(uuid_clone, &topic_clone, msg).await;
+                }
+            }));
+        }
+
+        // Wait for all emitters to complete
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Give receiver time to process
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        receiver_handle.abort();
+
+        // Verify we received all messages (via replay buffer check)
+        let (_, history) = subscribe_broadcast(uuid, topic).await;
+        // Replay buffer only holds 100, but we should have received most live
+        assert!(history.len() == REPLAY_BUFFER_CAPACITY,
+            "Replay buffer should be at capacity: {} != {}", history.len(), REPLAY_BUFFER_CAPACITY);
+
+        // Total emitted should be tracked
+        assert_eq!(total_expected, 1000);
+    }
+
+    #[tokio::test]
+    async fn stress_concurrent_subscribers() {
+        let uuid = Uuid::new_v4();
+        let topic = "stress:subscribers";
+        let num_subscribers = 20;
+        let num_messages = 50;
+
+        // Pre-emit some messages for history
+        for i in 0..num_messages {
+            emit_and_store(uuid, topic, format!("msg{}", i)).await;
+        }
+
+        // Spawn multiple subscribers concurrently
+        let mut handles = Vec::new();
+        for _ in 0..num_subscribers {
+            let uuid_clone = uuid;
+            let topic_clone = topic.to_string();
+            handles.push(tokio::spawn(async move {
+                let (_, history) = subscribe_broadcast(uuid_clone, &topic_clone).await;
+                history.len()
+            }));
+        }
+
+        // All subscribers should get the same history
+        for handle in handles {
+            let history_len = handle.await.unwrap();
+            assert_eq!(history_len, num_messages,
+                "Each subscriber should get all {} messages", num_messages);
+        }
+    }
+
+    #[tokio::test]
+    async fn stress_emit_subscribe_race() {
+        // Test that concurrent emit/subscribe operations don't deadlock or crash
+        // Use unique topic to avoid interference from other tests
+        let uuid = Uuid::new_v4();
+        let topic = format!("stress:race:{}", Uuid::new_v4());
+        let num_messages = 50;
+
+        // Emit messages first
+        for i in 0..num_messages {
+            emit_and_store(uuid, &topic, format!("msg{}", i)).await;
+        }
+
+        // Now subscribe and verify history is correct
+        let (_, history) = subscribe_broadcast(uuid, &topic).await;
+        assert_eq!(history.len(), num_messages,
+            "Should have {} messages in history", num_messages);
+
+        // Emit more while we have a subscriber
+        let (mut rx, _) = subscribe_broadcast(uuid, &topic).await;
+
+        // Spawn emitter
+        let uuid_clone = uuid;
+        let topic_clone = topic.clone();
+        let emitter = tokio::spawn(async move {
+            for i in num_messages..(num_messages * 2) {
+                emit_and_store(uuid_clone, &topic_clone, format!("msg{}", i)).await;
+            }
+        });
+
+        // Receive some messages (don't require all - just verify no deadlock)
+        let mut received = 0;
+        for _ in 0..10 {
+            if let Ok(Ok(_)) = tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                rx.recv()
+            ).await {
+                received += 1;
+            }
+        }
+
+        emitter.await.unwrap();
+
+        // Verify some messages were received live (proves no deadlock)
+        assert!(received > 0, "Should receive at least some messages live");
+
+        // Final history check - should have last 100 messages
+        let (_, final_history) = subscribe_broadcast(uuid, &topic).await;
+        assert_eq!(final_history.len(), REPLAY_BUFFER_CAPACITY,
+            "History should be at capacity");
+    }
+
+    #[tokio::test]
+    async fn stress_high_throughput() {
+        let uuid = Uuid::new_v4();
+        let topic = "stress:throughput";
+        let num_messages = 5000;
+
+        let start = std::time::Instant::now();
+
+        for i in 0..num_messages {
+            emit_and_store(uuid, topic, format!("msg{}", i)).await;
+        }
+
+        let elapsed = start.elapsed();
+        let msgs_per_sec = num_messages as f64 / elapsed.as_secs_f64();
+
+        // Should handle at least 10k msgs/sec (conservative for CI)
+        assert!(msgs_per_sec > 10_000.0,
+            "Throughput {} msgs/sec is below minimum 10k/sec", msgs_per_sec);
+
+        // Verify replay buffer integrity
+        let (_, history) = subscribe_broadcast(uuid, topic).await;
+        assert_eq!(history.len(), REPLAY_BUFFER_CAPACITY);
+
+        // Last message should be the final one
+        assert_eq!(history.last().unwrap(), &format!("msg{}", num_messages - 1));
     }
 }

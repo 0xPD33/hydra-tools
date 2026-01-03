@@ -7,11 +7,44 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use crate::constants::HYDRA_DIR_PERMISSIONS;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Limits {
+    /// Maximum message size in bytes (default: 10KB)
+    #[serde(default = "default_max_message_size")]
+    pub max_message_size: usize,
+    /// Replay buffer capacity per channel (default: 100)
+    #[serde(default = "default_replay_buffer_capacity")]
+    pub replay_buffer_capacity: usize,
+    /// Broadcast channel capacity (default: 1024)
+    #[serde(default = "default_broadcast_channel_capacity")]
+    pub broadcast_channel_capacity: usize,
+    /// Rate limit: max messages per second per client (0 = unlimited)
+    #[serde(default)]
+    pub rate_limit_per_second: usize,
+}
+
+fn default_max_message_size() -> usize { crate::constants::MAX_MESSAGE_SIZE }
+fn default_replay_buffer_capacity() -> usize { crate::constants::REPLAY_BUFFER_CAPACITY }
+fn default_broadcast_channel_capacity() -> usize { crate::constants::BROADCAST_CHANNEL_CAPACITY }
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_message_size: default_max_message_size(),
+            replay_buffer_capacity: default_replay_buffer_capacity(),
+            broadcast_channel_capacity: default_broadcast_channel_capacity(),
+            rate_limit_per_second: 0,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     pub project_uuid: Uuid,
     pub socket_path: PathBuf,
     pub default_topics: Vec<String>,
+    #[serde(default)]
+    pub limits: Limits,
 }
 
 impl Config {
@@ -34,6 +67,7 @@ impl Config {
                 "repo:delta".to_string(),
                 "agent:presence".to_string(),
             ],
+            limits: Limits::default(),
         };
 
         let config_path = hydra_dir.join("config.toml");
@@ -182,6 +216,7 @@ mod tests {
             project_uuid: Uuid::parse_str("a1b2c3d4-e5f6-7890-abcd-ef1234567890").unwrap(),
             socket_path: PathBuf::from(".hydra/hydra.sock"),
             default_topics: vec!["repo:delta".to_string(), "agent:presence".to_string()],
+            limits: Limits::default(),
         };
 
         let toml_str = toml::to_string(&config).unwrap();
@@ -190,6 +225,7 @@ mod tests {
         assert_eq!(config.project_uuid, loaded.project_uuid);
         assert_eq!(config.socket_path, loaded.socket_path);
         assert_eq!(config.default_topics, loaded.default_topics);
+        assert_eq!(config.limits.max_message_size, loaded.limits.max_message_size);
     }
 
     #[test]
@@ -203,5 +239,37 @@ mod tests {
         let loaded = Config::load(project_root).unwrap();
         assert_eq!(config.project_uuid, loaded.project_uuid);
         assert!(config.socket_path.starts_with(project_root.join(".hydra")));
+    }
+
+    #[test]
+    fn test_config_backward_compat_no_limits() {
+        // Old configs without limits field should load with defaults
+        let old_config = r#"
+project_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+socket_path = ".hydra/hydra.sock"
+default_topics = ["repo:delta"]
+"#;
+        let loaded: Config = toml::from_str(old_config).unwrap();
+        assert_eq!(loaded.limits.max_message_size, crate::constants::MAX_MESSAGE_SIZE);
+        assert_eq!(loaded.limits.replay_buffer_capacity, crate::constants::REPLAY_BUFFER_CAPACITY);
+        assert_eq!(loaded.limits.rate_limit_per_second, 0);
+    }
+
+    #[test]
+    fn test_config_custom_limits() {
+        let custom_config = r#"
+project_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+socket_path = ".hydra/hydra.sock"
+default_topics = ["repo:delta"]
+
+[limits]
+max_message_size = 51200
+replay_buffer_capacity = 500
+rate_limit_per_second = 100
+"#;
+        let loaded: Config = toml::from_str(custom_config).unwrap();
+        assert_eq!(loaded.limits.max_message_size, 51200);
+        assert_eq!(loaded.limits.replay_buffer_capacity, 500);
+        assert_eq!(loaded.limits.rate_limit_per_second, 100);
     }
 }

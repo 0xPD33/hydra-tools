@@ -1,4 +1,4 @@
-/// Hydra Mail constants
+//! Hydra Mail constants
 
 /// Maximum size for a single message in bytes (10KB)
 pub const MAX_MESSAGE_SIZE: usize = 10_240;

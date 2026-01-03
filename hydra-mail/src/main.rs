@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use hydra_mail::{config::Config, channels, constants::*};
+use hydra_mail::{config::{Config, Limits}, channels, constants::*};
 use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -284,8 +284,9 @@ async fn main() -> Result<()> {
                         match accept_result {
                             Ok((stream, _)) => {
                                 let project_uuid = config.project_uuid;
+                                let limits = config.limits.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_conn(stream, project_uuid).await {
+                                    if let Err(e) = handle_conn(stream, project_uuid, limits).await {
                                         eprintln!("Connection handler error: {:#}", e);
                                     }
                                 });
@@ -595,21 +596,65 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle_conn(mut stream: UnixStream, project_uuid: Uuid) -> Result<()> {
+async fn handle_conn(mut stream: UnixStream, project_uuid: Uuid, limits: Limits) -> Result<()> {
+    use std::collections::VecDeque;
+    use std::time::Instant;
+
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader).lines();
 
+    // Rate limiting: sliding window of emit timestamps
+    let mut emit_times: VecDeque<Instant> = VecDeque::new();
+    let rate_limit = limits.rate_limit_per_second;
+
     while let Some(line) = reader.next_line().await? {
         let cmd: Value = serde_json::from_str(&line).context("Failed to parse JSON command")?;
-        
+
         match cmd["cmd"].as_str() {
             Some("emit") => {
+                // Check rate limit (if enabled)
+                if rate_limit > 0 {
+                    let now = Instant::now();
+                    // Remove timestamps older than 1 second
+                    while let Some(&oldest) = emit_times.front() {
+                        if now.duration_since(oldest).as_secs_f64() > 1.0 {
+                            emit_times.pop_front();
+                        } else {
+                            break;
+                        }
+                    }
+                    // Check if we're over the limit
+                    if emit_times.len() >= rate_limit {
+                        let err_resp = json!({
+                            "status": "error",
+                            "msg": format!("Rate limit exceeded: {} msgs/sec", rate_limit)
+                        });
+                        writer.write_all(err_resp.to_string().as_bytes()).await?;
+                        writer.write_all(b"\n").await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+                    emit_times.push_back(now);
+                }
+
                 let channel = cmd["channel"].as_str().context("Missing channel")?.to_string();
 
                 // Get the base64 encoded TOON data and store as-is (no decode needed!)
                 let encoded_data = cmd["data"].as_str().context("Missing data")?;
                 let decoded_bytes = general_purpose::STANDARD.decode(encoded_data)
                     .context("Failed to decode base64 data")?;
+
+                // Check message size limit
+                if decoded_bytes.len() > limits.max_message_size {
+                    let err_resp = json!({
+                        "status": "error",
+                        "msg": format!("Message too large: {} bytes (max {})", decoded_bytes.len(), limits.max_message_size)
+                    });
+                    writer.write_all(err_resp.to_string().as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                    writer.flush().await?;
+                    continue;
+                }
 
                 // Just validate UTF-8, but don't decode TOON
                 let toon_str = String::from_utf8(decoded_bytes)
