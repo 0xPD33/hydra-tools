@@ -259,6 +259,24 @@ async fn main() -> Result<()> {
             fs::write(&pid_file, std::process::id().to_string())
                 .context("Failed to write daemon.pid")?;
 
+            // Enable message logging for crash recovery
+            let log_path = hydra_dir.join("messages.log");
+            channels::set_message_log_path(Some(log_path.clone()));
+
+            // Replay message log to restore state after crash
+            if log_path.exists() {
+                match channels::replay_message_log(&log_path).await {
+                    Ok(count) => {
+                        if count > 0 {
+                            eprintln!("Restored {} messages from log", count);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to replay message log: {}", e);
+                    }
+                }
+            }
+
             // Set up signal handling for graceful shutdown
             let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                 .context("Failed to install SIGTERM handler")?;
@@ -266,6 +284,19 @@ async fn main() -> Result<()> {
                 .context("Failed to install SIGINT handler")?;
 
             eprintln!("Daemon started (PID: {}). Press Ctrl+C or send SIGTERM to stop.", std::process::id());
+
+            // Spawn log compaction task (runs every 10 minutes)
+            let log_path_compact = log_path.clone();
+            let compaction_task = tokio::spawn(async move {
+                use hydra_mail::message_log::MessageLog;
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600)); // 10 min
+                loop {
+                    interval.tick().await;
+                    if let Ok(log) = MessageLog::open(&log_path_compact) {
+                        let _ = log.compact(REPLAY_BUFFER_CAPACITY);
+                    }
+                }
+            });
 
             // Run the accepting loop with graceful shutdown
             loop {
@@ -299,6 +330,7 @@ async fn main() -> Result<()> {
             }
 
             // Cleanup on shutdown
+            compaction_task.abort();
             let _ = fs::remove_file(&pid_file);
             let _ = fs::remove_file(&config.socket_path);
             eprintln!("Daemon stopped cleanly.");

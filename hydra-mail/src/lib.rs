@@ -1,6 +1,7 @@
 pub mod config;
 pub mod channels;
 pub mod constants;
+pub mod message_log;
 
 // Removed modules (dead code):
 // - schema: Pulse struct was never used, main.rs builds JSON directly

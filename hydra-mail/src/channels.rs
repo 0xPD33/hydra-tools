@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 use crate::constants::{REPLAY_BUFFER_CAPACITY, BROADCAST_CHANNEL_CAPACITY};
+use std::path::PathBuf;
 
 /// Stores the last N messages per channel for late subscribers.
 /// Uses a ring buffer (VecDeque) to maintain constant memory usage.
@@ -38,6 +39,43 @@ type ChannelMap = HashMap<ChannelKey, ChannelValue>;
 
 static BROADCAST_CHANNELS: LazyLock<Arc<tokio::sync::Mutex<ChannelMap>>> =
     LazyLock::new(|| Arc::new(tokio::sync::Mutex::new(HashMap::new())));
+
+static MESSAGE_LOG: LazyLock<Arc<Mutex<Option<crate::message_log::MessageLog>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+/// Set the path for message logging (for crash recovery)
+pub fn set_message_log_path(path: Option<PathBuf>) {
+    use crate::message_log::MessageLog;
+
+    let mut log = MESSAGE_LOG.lock().unwrap();
+    *log = path.and_then(|p| MessageLog::open(&p).ok());
+}
+
+/// Append message to log file (if logging is enabled)
+fn log_message(project_uuid: Uuid, channel: &str, message: &str) {
+    // Try to get lock without blocking - if we can't get it, skip logging this message
+    // This prevents blocking the async runtime if the log is temporarily locked
+    if let Ok(mut log_guard) = MESSAGE_LOG.try_lock() {
+        if let Some(log) = log_guard.as_mut() {
+            let _ = log.append(project_uuid, channel, message);
+        }
+    }
+}
+
+/// Replay message log to restore replay buffers after crash
+pub async fn replay_message_log(log_path: &std::path::Path) -> anyhow::Result<usize> {
+    use crate::message_log::MessageLog;
+
+    let log = MessageLog::open(log_path)?;
+    let entries = log.replay()?;
+    let count = entries.len();
+
+    for entry in entries {
+        emit_and_store(entry.project_uuid, &entry.channel, entry.message).await;
+    }
+
+    Ok(count)
+}
 
 pub async fn get_or_create_broadcast_tx(project_uuid: Uuid, topic: &str) -> broadcast::Sender<String> {
     let key = (project_uuid, topic.to_string());
@@ -76,6 +114,9 @@ pub async fn emit_and_store(project_uuid: Uuid, topic: &str, message: String) ->
         tx.clone()
     };
     // Lock released here
+
+    // Log message for crash recovery (async, non-blocking)
+    log_message(project_uuid, topic, &message);
 
     // Broadcast outside the lock - if there are no receivers, that's OK, we stored it
     // The replay buffer ensures late subscribers can catch up
@@ -129,6 +170,13 @@ pub async fn list_channels(project_uuid: Uuid) -> Vec<String> {
     channels.sort();
     channels.dedup();
     channels
+}
+
+/// Clear all channels (for testing crash recovery)
+#[doc(hidden)]
+pub async fn clear_all_channels() {
+    let mut map = BROADCAST_CHANNELS.lock().await;
+    map.clear();
 }
 
 #[cfg(test)]
