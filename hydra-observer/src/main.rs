@@ -1,11 +1,9 @@
-//! Hydra Observer - Animated Claude overlay that follows cursor and reacts to terminals
+//! Hydra Observer - HydraMail integration for Mascots
+//!
+//! This crate integrates the Mascots desktop companion with HydraMail,
+//! enabling the mascot to react to agent communications and Hydra ecosystem events.
 
-mod app;
-mod config;
-mod core;
-mod input;
-mod platform;
-mod renderer;
+mod hydra_provider;
 
 use anyhow::Result;
 use clap::Parser;
@@ -14,7 +12,7 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(name = "hydra-observer")]
-#[command(about = "Animated Claude overlay that follows cursor and reacts to terminals")]
+#[command(about = "HydraMail-integrated desktop companion")]
 #[command(version)]
 struct Cli {
     /// Config file path (defaults to XDG config)
@@ -41,39 +39,42 @@ fn main() -> Result<()> {
 
     // Initialize logging
     let filter = if cli.verbose {
-        EnvFilter::new("hydra_observer=debug,wgpu=warn")
+        EnvFilter::new("hydra_observer=debug,mascots=debug,wgpu=warn")
     } else {
-        EnvFilter::new("hydra_observer=info,wgpu=error")
+        EnvFilter::new("hydra_observer=info,mascots=info,wgpu=error")
     };
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    info!("Starting hydra-observer");
+    info!("Starting Hydra Observer (powered by Mascots)");
 
-    // Load configuration
-    let config = config::Config::load(cli.config.as_deref())?;
+    // TODO: Initialize Hydra provider for HydraMail integration
+    // let _provider = hydra_provider::HydraProvider::new()?;
+
+    // Load mascots configuration
+    let config = mascots::Config::load(cli.config.as_deref())?;
     info!(?config, "Loaded configuration");
 
-    // Detect and initialize platform
+    // Detect platform
     let platform = detect_platform(cli.platform)?;
     info!(?platform, "Detected platform");
 
-    // Run the application
-    app::run(config, platform)
+    // Run the mascots application
+    mascots::run(config, platform)
 }
 
-fn detect_platform(forced: Option<PlatformChoice>) -> Result<platform::PlatformType> {
+fn detect_platform(forced: Option<PlatformChoice>) -> Result<mascots::PlatformType> {
     if let Some(choice) = forced {
         return Ok(match choice {
-            PlatformChoice::Wayland => platform::PlatformType::Wayland,
-            PlatformChoice::X11 => platform::PlatformType::X11,
+            PlatformChoice::Wayland => mascots::PlatformType::Wayland,
+            PlatformChoice::X11 => mascots::PlatformType::X11,
         });
     }
 
     // Auto-detect based on environment
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        Ok(platform::PlatformType::Wayland)
+        Ok(mascots::PlatformType::Wayland)
     } else if std::env::var("DISPLAY").is_ok() {
-        Ok(platform::PlatformType::X11)
+        Ok(mascots::PlatformType::X11)
     } else {
         anyhow::bail!("No display server detected. Set WAYLAND_DISPLAY or DISPLAY.")
     }
