@@ -144,14 +144,6 @@ async fn main() -> Result<()> {
             println!("Hydra initialized in {:?} with UUID: {}", project_path, config.project_uuid);
             println!("Socket path: {:?}", config.socket_path);
 
-            // Generate Skills YAML for Claude integration
-            let skills_dir = hydra_dir.join("skills");
-            fs::create_dir_all(&skills_dir).context("Failed to create skills directory")?;
-            let yaml_path = skills_dir.join("hydra-mail.yaml");
-            fs::write(&yaml_path, config.generate_skill_yaml())
-                .context("Failed to write hydra-mail.yaml")?;
-            println!("✓ Generated .hydra/skills/hydra-mail.yaml");
-
             // Generate config.sh for shell integration
             let sh_path = hydra_dir.join("config.sh");
             fs::write(&sh_path, config.generate_config_sh())
@@ -160,10 +152,8 @@ async fn main() -> Result<()> {
                 .context("Failed to set config.sh permissions")?;
             println!("✓ Generated .hydra/config.sh");
 
-            println!("\n📝 Next steps:");
-            println!("   1. Upload .hydra/skills/hydra-mail.yaml to your Claude session");
-            println!("   2. Use hydra_emit and hydra_subscribe tools in prompts");
-            println!("   3. All messages automatically use TOON encoding (30-60% token savings)");
+            println!("\nTo use with Claude Code, install the hydra-mail skill from:");
+            println!("   https://github.com/0xPD33/hydra-tools/hydra-mail/skills/hydra-mail.yaml");
 
             if daemon {
                 eprintln!("Spawning daemon process...");
