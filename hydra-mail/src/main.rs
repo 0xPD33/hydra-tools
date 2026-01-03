@@ -559,13 +559,46 @@ async fn main() -> Result<()> {
                 println!("Daemon: ✗ not running (no daemon.pid)");
             }
             
-            // Try to connect and list channels if daemon is running
+            // Try to get stats from daemon if running
             if config.socket_path.exists() {
                 match UnixStream::connect(&config.socket_path).await {
-                    Ok(_) => {
-                        // Daemon is responsive - could add RPC command to list channels
-                        // For MVP, just show defaults
-                        println!("\nNote: Use 'hydra-mail subscribe --channel <TOPIC>' to listen");
+                    Ok(mut stream) => {
+                        use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+
+                        // Send stats command
+                        let cmd = json!({"cmd": "stats"});
+                        stream.write_all(cmd.to_string().as_bytes()).await?;
+                        stream.write_all(b"\n").await?;
+                        stream.flush().await?;
+
+                        // Read response
+                        let mut reader = BufReader::new(stream).lines();
+                        if let Some(line) = reader.next_line().await? {
+                            if let Ok(resp) = serde_json::from_str::<Value>(&line) {
+                                if let Some(channels) = resp["channels"].as_array() {
+                                    println!("\nActive Channels:");
+                                    if channels.is_empty() {
+                                        println!("  (none)");
+                                    } else {
+                                        for ch in channels {
+                                            let name = ch["channel"].as_str().unwrap_or("?");
+                                            let buffer_size = ch["replay_buffer_size"].as_u64().unwrap_or(0);
+                                            let subs = ch["subscriber_count"].as_u64().unwrap_or(0);
+                                            println!("  {} - {} msgs buffered, {} subscribers", name, buffer_size, subs);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Show log file stats
+                        let log_path = hydra_dir.join("messages.log");
+                        if log_path.exists() {
+                            if let Ok(metadata) = fs::metadata(&log_path) {
+                                let size_kb = metadata.len() / 1024;
+                                println!("\nMessage Log: {} KB", size_kb);
+                            }
+                        }
                     }
                     Err(_) => {
                         println!("\nWarning: Socket exists but cannot connect (daemon may be stuck)");
@@ -707,6 +740,16 @@ async fn handle_conn(mut stream: UnixStream, project_uuid: Uuid, limits: Limits)
                     writer.write_all(b"\n").await?;
                     writer.flush().await?;
                 }
+            }
+            Some("stats") => {
+                let stats = channels::get_channel_stats(project_uuid).await;
+                let resp = json!({
+                    "status": "ok",
+                    "channels": stats
+                });
+                writer.write_all(resp.to_string().as_bytes()).await?;
+                writer.write_all(b"\n").await?;
+                writer.flush().await?;
             }
             _ => {
                 let err_resp = json!({"status": "error", "msg": "Unknown command"});

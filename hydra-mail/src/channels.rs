@@ -179,6 +179,33 @@ pub async fn clear_all_channels() {
     map.clear();
 }
 
+/// Channel statistics
+#[derive(Debug, serde::Serialize)]
+pub struct ChannelStats {
+    pub channel: String,
+    pub replay_buffer_size: usize,
+    pub subscriber_count: usize,
+}
+
+/// Get statistics for all channels of a project
+pub async fn get_channel_stats(project_uuid: Uuid) -> Vec<ChannelStats> {
+    let map = BROADCAST_CHANNELS.lock().await;
+    let mut stats = Vec::new();
+
+    for ((uuid, channel), (tx, buffer)) in map.iter() {
+        if *uuid == project_uuid {
+            stats.push(ChannelStats {
+                channel: channel.clone(),
+                replay_buffer_size: buffer.messages.len(),
+                subscriber_count: tx.receiver_count(),
+            });
+        }
+    }
+
+    stats.sort_by(|a, b| a.channel.cmp(&b.channel));
+    stats
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
