@@ -20,6 +20,7 @@
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
   };
 
   # --- Outputs ---
@@ -79,11 +80,14 @@
         });
 
         # ============================================================
-        # HYDRA-OBSERVER
+        # HYDRA-OBSERVER (depends on mascots)
         # ============================================================
+        # Note: hydra-observer is now a thin integration layer.
+        # Most GPU/Wayland deps come from the mascots crate.
+        # We still need these for linking when building with mascots.
         observerBuildInputs = [
           pkgs.pkg-config
-          # Wayland
+          # Wayland (needed for linking with mascots)
           pkgs.wayland
           pkgs.wayland-protocols
           pkgs.libxkbcommon
