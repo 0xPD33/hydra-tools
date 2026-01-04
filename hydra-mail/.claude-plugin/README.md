@@ -12,22 +12,26 @@ Multi-agent pub/sub messaging system with TOON encoding for token-efficient coor
 
 ## Installation
 
-### Option 1: Install from Local Repository
-
-If you've cloned this repository:
+### Option 1: Load for Current Session
 
 ```bash
-# From the hydra-tools directory
-claude plugins install --local .
-
-# Or specify the full path
-claude plugins install --local /path/to/hydra-tools
+# Load plugin for this session only
+claude --plugin-dir /path/to/hydra-tools/hydra-mail
 ```
 
-### Option 2: Install from GitHub
+### Option 2: Install via Slash Command
+
+Within a Claude Code session:
+
+```
+/plugin install hydra-mail@0xPD33
+```
+
+### Option 3: Symlink for Persistent Use
 
 ```bash
-claude plugins install --git https://github.com/0xPD33/hydra-tools.git
+# Link to your .claude directory for automatic loading
+ln -s /path/to/hydra-tools/hydra-mail/.claude-plugin ~/.claude/plugins/hydra-mail
 ```
 
 ## Usage
@@ -41,7 +45,6 @@ hydra-mail init --daemon
 
 This creates:
 - `.hydra/config.toml` - Project configuration with UUID
-- `.hydra/skills/hydra-mail.yaml` - Claude Code skill (auto-uploaded)
 - `.hydra/config.sh` - Shell integration
 - Daemon process for persistent messaging
 
@@ -120,9 +123,8 @@ cargo build --release
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - Detailed design document
-- [CLAUDE.md](CLAUDE.md) - Project guidance for Claude Code
-- [Skills](skills/hydra-mail/SKILL.md) - Skill reference
+- [Architecture](../docs/ARCHITECTURE.md) - Detailed design document
+- [CLAUDE.md](../CLAUDE.md) - Project guidance for Claude Code
 
 ## License
 
