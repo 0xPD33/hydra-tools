@@ -28,7 +28,7 @@ Lightweight in-memory pub/sub messaging system with TOON encoding for token-effi
 - 📼 Replay buffer - Last 100 messages per channel
 - 🎯 Zero dependencies - Pure Rust, no external brokers
 
-**Status**: v0.1.0 | **Required by**: hydra-wt, hydra-observer (optional)
+**Status**: v0.1.0 | **Required by**: hydra-wt, hydra-observer
 
 ### [hydra-wt](hydra-wt/) (Worktree Manager)
 
@@ -41,16 +41,16 @@ Worktree management for parallel development with automatic port allocation and 
 
 **Status**: v0.1.0 | **Requires**: hydra-mail
 
-### [hydra-observer](hydra-observer/) (Desktop Mascot)
+### [hydra-observer](hydra-observer/) (Mascots Integration)
 
-Animated desktop mascot that follows your cursor and reacts to your work environment.
+HydraMail integration layer for the [Mascots](https://github.com/0xPD33/mascots) desktop companion.
 
-- 👁️ Cursor tracking - Eyes follow your mouse
-- 😊 Context reactions - Blushes near terminals
-- 🖱️ Interactive - Drag and drop, window attachment
-- 🎨 GPU rendered - wgpu with custom shaders
+- 🔗 Connects Mascots to HydraMail channels
+- 📡 Reacts to `repo:delta`, `team:alert`, `team:status` messages
+- 🎭 Shows agent activity through mascot animations
+- 🖱️ Click-to-interact with Hydra ecosystem
 
-**Status**: v0.1.0 | **Requires**: hydra-mail (optional, for coordination awareness)
+**Status**: v0.1.0 | **Requires**: hydra-mail, [Mascots](https://github.com/0xPD33/mascots)
 
 ## Dependency Graph
 
@@ -65,9 +65,14 @@ Animated desktop mascot that follows your cursor and reacts to your work environ
         ▼                   ▼
 ┌───────────────┐   ┌───────────────┐
 │   hydra-wt    │   │hydra-observer │
-│  (worktrees)  │   │   (mascot)    │
-│   REQUIRED    │   │   OPTIONAL    │
-└───────────────┘   └───────────────┘
+│  (worktrees)  │   │(mascots glue) │
+└───────────────┘   └───────┬───────┘
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │    Mascots    │
+                    │  (external)   │
+                    └───────────────┘
 ```
 
 ## Building
@@ -105,9 +110,9 @@ hydra-tools/
 ├── hydra-wt/             # Worktree manager
 │   ├── src/
 │   └── README.md
-├── hydra-observer/       # Desktop mascot
+├── hydra-observer/       # Mascots integration
 │   ├── src/
-│   └── docs/
+│   └── README.md
 ├── flake.nix             # Nix build definitions
 └── README.md             # This file
 ```
@@ -118,7 +123,7 @@ hydra-tools/
 |---------|--------|-----------------|
 | hydra-mail | [README](hydra-mail/README.md) | [CLAUDE.md](hydra-mail/CLAUDE.md) |
 | hydra-wt | [README](hydra-wt/README.md) | [CLAUDE.md](hydra-wt/CLAUDE.md) |
-| hydra-observer | [README](hydra-observer/README.md) | [docs/](hydra-observer/docs/) |
+| hydra-observer | [README](hydra-observer/README.md) | - |
 
 ## License
 
