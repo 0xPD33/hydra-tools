@@ -12,26 +12,25 @@ Multi-agent pub/sub messaging system with TOON encoding for token-efficient coor
 
 ## Installation
 
-### Option 1: Load for Current Session
-
 ```bash
-# Load plugin for this session only
+# Symlink skill for persistent use
+ln -s /path/to/hydra-tools/hydra-mail/.claude-plugin/skills/hydra-mail ~/.claude/skills/hydra-mail
+
+# Or load plugin for one session
 claude --plugin-dir /path/to/hydra-tools/hydra-mail
 ```
 
-### Option 2: Install via Slash Command
-
-Within a Claude Code session:
-
-```
-/plugin install hydra-mail@0xPD33
-```
-
-### Option 3: Symlink for Persistent Use
+## Testing
 
 ```bash
-# Link to your .claude directory for automatic loading
-ln -s /path/to/hydra-tools/hydra-mail/.claude-plugin ~/.claude/plugins/hydra-mail
+# 1. Start Claude with the plugin
+claude --plugin-dir ./hydra-mail
+
+# 2. Verify skill loaded
+> What skills are available?
+
+# 3. Test the skill triggers
+> I just fixed a bug in auth.py, emit this to hydra-mail
 ```
 
 ## Usage
