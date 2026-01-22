@@ -1,98 +1,80 @@
 ---
 name: hydra-mail
-description: Use when working on projects with multiple AI agents that need to coordinate and share state changes - provides lightweight pub/sub messaging with 30-60% token savings via TOON encoding. Emit completed actions to channels (repo:delta for code changes, team:alert for errors, team:question for coordination needs).
+description: >
+  Multi-agent pub/sub coordination for AI agents working in parallel. Use when:
+  (1) Project has .hydra/ directory initialized,
+  (2) Working with multiple agents or parallel tasks,
+  (3) Need to coordinate, communicate, or share state with other agents,
+  (4) Starting a session and should check what other agents did,
+  (5) Finishing work and should notify other agents.
+  Triggers: multi-agent, coordinate, other agents, parallel agents, emit, broadcast, hydra-mail, check messages, agent coordination.
+hooks:
+  SessionStart:
+    - hooks:
+        - type: command
+          command: "hydra-mail hook session-start --project ."
+  Stop:
+    - hooks:
+        - type: command
+          command: "hydra-mail hook stop --project ."
 ---
 
-# Hydra Mail - Multi-Agent Pub/Sub
+# Hydra Mail
 
-## Core Principle
-**Emit state deltas after completing actions.** Messages use TOON (Token-Oriented Object Notation) for automatic token efficiency.
+Multi-agent pub/sub for coordinating parallel AI agents.
 
-## When to Emit
+## Automatic Behavior
 
-**After these actions** (not during):
-- File edits, refactoring, architecture changes → `repo:delta`
-- Test results, build status → `team:status`
-- Errors, warnings, blockers → `team:alert`
-- Questions needing input → `team:question`
+- **On session start**: Checks for recent messages from other agents
+- **On stop**: Reminds you to emit a summary of your work
 
-**Never emit:**
-- Before changes (no speculation)
-- During partial work (wait until complete)
-- Every keystroke (batch related changes)
+## Commands
 
-## Tools
-
-### hydra_emit
-Broadcast a state change to other agents (auto-encodes to TOON)
-
-**Parameters:**
-- `channel` (required): Namespace:topic format - `repo:delta`, `team:alert`, `team:status`, `team:question`
-- `type` (required): Action type - `delta`, `status`, `alert`, `question`, `ack`
-- `data` (required): JSON with `action` (what), `target` (where), `reason` (why), `impact` (effects)
-
-**Command:**
+Check for messages:
 ```bash
-if [ -d ".hydra" ]; then
-  source .hydra/config.sh
-  printf '%s\n' "$data" | hydra-mail emit --project . --channel "$channel" --type "$type" --data @-
-else
-  echo "Hydra not initialized. Run: hydra-mail init --daemon" >&2
-  exit 1
-fi
+hydra-mail subscribe --channel repo:delta --once
 ```
 
-### hydra_subscribe
-Listen for messages from other agents (auto-decodes TOON)
-
-**Parameters:**
-- `channel` (required): Channel to subscribe to
-- `once` (boolean, default true): Get one message and exit (true) or stream continuously (false)
-
-**Command:**
+Emit your work:
 ```bash
-if [ -d ".hydra" ]; then
-  source .hydra/config.sh
-  if [ "$once" = "true" ]; then
-    hydra-mail subscribe --project . --channel "$channel" --once
-  else
-    hydra-mail subscribe --project . --channel "$channel"
-  fi
-else
-  echo "Hydra not initialized" >&2
-  exit 1
-fi
+hydra-mail emit --channel repo:delta --type delta \
+  --data '{"action":"<verb>","target":"<file>","summary":"<what changed>"}'
 ```
 
-## Quick Reference
+## Channels
 
-| Scenario | Channel | Type | Data Example |
-|----------|---------|------|--------------|
-| Fixed auth bug | repo:delta | delta | `{"action":"fixed","target":"auth.py","impact":"login validates tokens"}` |
-| Refactored DB | repo:delta | delta | `{"action":"refactored","target":"db/","reason":"performance","impact":"query API changed"}` |
-| Tests failing | team:alert | alert | `{"action":"test_failure","target":"integration","count":3}` |
-| Need input | team:question | question | `{"action":"question","topic":"API design","details":"REST or GraphQL?"}` |
-| Task done | team:status | status | `{"action":"completed","task":"user auth","duration":"2h"}` |
+| Channel | Use For |
+|---------|---------|
+| `repo:delta` | Code changes, fixes, refactoring |
+| `team:status` | Task completion, progress |
+| `team:alert` | Errors, blockers |
+| `team:question` | Questions needing input |
 
-## Common Mistakes
+## Message Format
 
-❌ **Emitting before action**: `"planning to update routes.py"`
-✅ **Emit after**: `"updated routes.py with new auth flow"`
+```json
+{"action":"<verb>","target":"<what>","summary":"<impact>"}
+```
 
-❌ **Vague messages**: `{"file":"routes.py"}`
-✅ **Include context**: `{"action":"updated","target":"routes.py","reason":"fix CVE","impact":"login flow changed"}`
+**Actions**: `fixed`, `added`, `updated`, `refactored`, `completed`, `investigating`, `blocked`
 
-❌ **Wrong channel**: Using repo:delta for questions
-✅ **Match intent**: team:question for questions, repo:delta for code changes
+## Examples
 
-❌ **Every line change**
-✅ **Batch related changes**, emit when logical unit complete
+After fixing a bug:
+```bash
+hydra-mail emit --channel repo:delta --type delta \
+  --data '{"action":"fixed","target":"auth.py","summary":"token validation works"}'
+```
 
-## Technical Notes
+After completing work:
+```bash
+hydra-mail emit --channel repo:delta --type status \
+  --data '{"action":"completed","summary":"implemented user auth feature"}'
+```
 
-- **Replay buffer**: Last 100 messages per channel
-- **Late subscribers**: Receive full history automatically
-- **Latency**: <5ms message delivery
-- **Isolation**: Project-scoped by UUID
-- **TOON savings**: 30-60% smaller than JSON
-- **Persistence**: In-memory only (ephemeral)
+## Setup
+
+If not initialized:
+```bash
+hydra-mail init --daemon
+```

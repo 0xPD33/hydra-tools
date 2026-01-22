@@ -83,6 +83,27 @@ enum Commands {
         #[arg(short, long, default_value = ".")]
         project: String,
     },
+    /// Handle Claude Code hook events
+    Hook {
+        #[command(subcommand)]
+        event: HookEvent,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookEvent {
+    /// Handle SessionStart hook - check for messages from other agents
+    SessionStart {
+        /// Project path (default: .)
+        #[arg(short, long, default_value = ".")]
+        project: String,
+    },
+    /// Handle Stop hook - remind to emit summary
+    Stop {
+        /// Project path (default: .)
+        #[arg(short, long, default_value = ".")]
+        project: String,
+    },
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -646,6 +667,124 @@ async fn main() -> Result<()> {
             let _ = fs::remove_file(hydra_dir.join("daemon.err"));
             println!("Cleaned up daemon files in {:?}", project_path);
         }
+        Commands::Hook { event } => {
+            match event {
+                HookEvent::SessionStart { project } => {
+                    // Check if hydra is initialized
+                    let project_path = Path::new(&project);
+                    let hydra_dir = project_path.join(".hydra");
+
+                    if !hydra_dir.exists() {
+                        // Not initialized - return continue with no context
+                        println!("{}", json!({
+                            "result": "continue"
+                        }));
+                        return Ok(());
+                    }
+
+                    // Try to get recent messages
+                    let config = match Config::load(project_path) {
+                        Ok(c) => c,
+                        Err(_) => {
+                            println!("{}", json!({
+                                "result": "continue",
+                                "message": "Hydra Mail: Config invalid"
+                            }));
+                            return Ok(());
+                        }
+                    };
+
+                    // Check if daemon is running
+                    if !config.socket_path.exists() {
+                        println!("{}", json!({
+                            "result": "continue",
+                            "message": "Hydra Mail: Daemon not running. Run: hydra-mail init --daemon"
+                        }));
+                        return Ok(());
+                    }
+
+                    // Connect and get recent messages
+                    match UnixStream::connect(&config.socket_path).await {
+                        Ok(stream) => {
+                            let (reader_side, mut writer) = stream.into_split();
+                            let mut reader = BufReader::new(reader_side).lines();
+
+                            // Send subscribe command (same format as CLI)
+                            let subscribe_cmd = json!({
+                                "cmd": "subscribe",
+                                "channel": "repo:delta"
+                            });
+                            let cmd_str = subscribe_cmd.to_string() + "\n";
+                            if writer.write_all(cmd_str.as_bytes()).await.is_err() {
+                                println!("{}", json!({"result": "continue"}));
+                                return Ok(());
+                            }
+                            let _ = writer.flush().await;
+
+                            // Read messages with timeout (TOON format is multi-line YAML-like)
+                            let mut content = String::new();
+                            let mut line_count = 0;
+                            loop {
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_millis(100),
+                                    reader.next_line()
+                                ).await {
+                                    Ok(Ok(Some(line))) => {
+                                        content.push_str(&line);
+                                        content.push('\n');
+                                        line_count += 1;
+                                        // Stop after ~50 lines to avoid too much context
+                                        if line_count >= 50 {
+                                            break;
+                                        }
+                                    }
+                                    _ => break,
+                                }
+                            }
+
+                            if content.trim().is_empty() {
+                                println!("{}", json!({
+                                    "result": "continue",
+                                    "message": "Hydra Mail: No recent messages from other agents."
+                                }));
+                            } else {
+                                // Format messages as context (TOON is human-readable YAML-like)
+                                let context = format!(
+                                    "## Recent Hydra Mail messages from other agents:\n\n```yaml\n{}```\n\nReview these before starting work.",
+                                    content.trim()
+                                );
+
+                                println!("{}", json!({
+                                    "result": "continue",
+                                    "additionalContext": context
+                                }));
+                            }
+                        }
+                        Err(_) => {
+                            println!("{}", json!({
+                                "result": "continue",
+                                "message": "Hydra Mail: Could not connect to daemon"
+                            }));
+                        }
+                    }
+                }
+                HookEvent::Stop { project } => {
+                    let project_path = Path::new(&project);
+                    let hydra_dir = project_path.join(".hydra");
+
+                    if !hydra_dir.exists() {
+                        println!("{}", json!({"result": "continue"}));
+                        return Ok(());
+                    }
+
+                    // Return reminder to emit summary
+                    println!("{}", json!({
+                        "result": "continue",
+                        "additionalContext": "## Hydra Mail Reminder\n\nBefore finishing, emit a summary of your work:\n\n```bash\nhydra-mail emit --channel repo:delta --type status --data '{\"action\":\"completed\",\"summary\":\"<what you did>\"}'\n```"
+                    }));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -733,6 +872,8 @@ async fn handle_conn(mut stream: UnixStream, project_uuid: Uuid, limits: Limits)
                     writer.write_all(msg.as_bytes()).await?;
                     writer.write_all(b"\n").await?;
                 }
+                // Flush history so clients receive it immediately
+                writer.flush().await?;
 
                 // Then stream live messages until connection closes or error
                 while let Ok(msg) = rx.recv().await {
