@@ -1,4 +1,6 @@
+mod artifacts;
 mod config;
+mod hooks;
 mod hydra;
 mod ports;
 mod template;
@@ -97,6 +99,18 @@ fn cmd_create(branch: &str) -> Result<()> {
     // Save port allocation
     registry.save()?;
 
+    // Handle artifacts
+    let repo_root = config::get_repo_root()?;
+    if !cfg.artifacts.symlink.is_empty() || !cfg.artifacts.copy.is_empty() {
+        println!("Setting up artifacts...");
+    }
+    for artifact in &cfg.artifacts.symlink {
+        artifacts::symlink_artifact(&repo_root, &wt_path, artifact)?;
+    }
+    for artifact in &cfg.artifacts.copy {
+        artifacts::copy_artifact(&repo_root, &wt_path, artifact)?;
+    }
+
     // Render template if exists
     let template_path = PathBuf::from(&cfg.env.template);
     let output_path = wt_path.join(&cfg.env.output);
@@ -118,6 +132,9 @@ fn cmd_create(branch: &str) -> Result<()> {
     if template_path.exists() {
         println!("Created {}", output_path.display());
     }
+
+    // Run post-create hooks
+    hooks::run_post_create(&wt_path, &cfg.hooks.post_create)?;
 
     // Emit to Hydra
     hydra::emit_worktree_created(branch, port, &wt_path.to_string_lossy())?;
@@ -213,6 +230,9 @@ fn cmd_status(branch: Option<&str>) -> Result<()> {
                 let worktrees = worktree::list()?;
                 if let Some(wt) = worktrees.iter().find(|w| w.path == wt_path.to_string_lossy()) {
                     println!("  HEAD: {}", &wt.head[..8.min(wt.head.len())]);
+                    if let Some(ref branch) = wt.branch {
+                        println!("  Branch: {}", branch);
+                    }
                 }
             }
         }

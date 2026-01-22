@@ -7,6 +7,24 @@ pub struct WtConfig {
     pub ports: PortsConfig,
     pub env: EnvConfig,
     pub worktrees: WorktreesConfig,
+    #[serde(default)]
+    pub artifacts: ArtifactsConfig,
+    #[serde(default)]
+    pub hooks: HooksConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ArtifactsConfig {
+    #[serde(default)]
+    pub symlink: Vec<String>,
+    #[serde(default)]
+    pub copy: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct HooksConfig {
+    #[serde(default)]
+    pub post_create: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,6 +58,8 @@ impl Default for WtConfig {
             worktrees: WorktreesConfig {
                 directory: "../".to_string(),
             },
+            artifacts: ArtifactsConfig::default(),
+            hooks: HooksConfig::default(),
         }
     }
 }
