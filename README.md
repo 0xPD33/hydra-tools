@@ -4,17 +4,52 @@ A collection of Rust tools for multi-agent coordination and collaboration.
 
 ## Quick Start
 
-**hydra-mail is the foundation** - most other tools depend on it for coordination. Start here:
+### For Claude Code Users (Recommended)
 
 ```bash
-# Install hydra-mail first
+# Add the marketplace and install the plugin
+claude plugin marketplace add 0xPD33/hydra-tools
+claude plugin install hydra-mail@hydra-tools
+
+# In any project, initialize hydra-mail
+cargo install --git https://github.com/0xPD33/hydra-tools hydra-mail
+hydra-mail init --daemon
+```
+
+The plugin includes a skill with **automatic hooks**:
+- **SessionStart**: Checks for messages from other agents
+- **Stop**: Reminds to emit a summary of your work
+
+### Manual Installation
+
+```bash
+# With Nix
 nix build .#hydra-mail
 ./result/bin/hydra-mail init --daemon
 
-# Then add other tools as needed
-nix build .#hydra-wt
-nix build .#hydra-observer
+# With Cargo
+cargo install --git https://github.com/0xPD33/hydra-tools hydra-mail
+hydra-mail init --daemon
 ```
+
+## Multi-Agent Coordination
+
+Once initialized, agents communicate via channels:
+
+```bash
+# Emit a change
+echo '{"action":"fixed","target":"auth.py","impact":"login works"}' | \
+  hydra-mail emit --channel repo:delta --type delta --data @-
+
+# Listen for changes
+hydra-mail subscribe --channel repo:delta --once
+```
+
+**Channels:**
+- `repo:delta` - Code changes, refactoring, fixes
+- `team:status` - Task completion, build results
+- `team:alert` - Errors, blockers, warnings
+- `team:question` - Questions needing input
 
 ## Projects
 

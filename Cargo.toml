@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "hydra-mail",
+    "hydra-wt",
+    "hydra-orchestrator",
+    "hydra-cli",
+]
+exclude = [
+    "hydra-observer",  # Private git dependency
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"

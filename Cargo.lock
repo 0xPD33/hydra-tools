@@ -893,11 +893,13 @@ name = "hydra-orchestrator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "hydra-wt",
  "serde",
  "serde_json",
  "tokio",
  "toml 0.8.23",
+ "toon-format",
  "uuid",
 ]
 

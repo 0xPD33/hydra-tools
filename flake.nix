@@ -1,5 +1,5 @@
 {
-  description = "Hydra Tools - Agent utilities (hydra-mail, hydra-observer, hydra-wt)";
+  description = "Hydra Tools - Agent utilities (hydra-mail, hydra-observer, hydra-wt, hydralph, hydra-orchestrator)";
 
   # --- Inputs ---
   # These are the external dependencies for our development environment.
@@ -150,6 +150,37 @@
           pname = "hydra-wt";
         });
 
+        # ============================================================
+        # HYDRA-ORCHESTRATOR (Session management library)
+        # ============================================================
+        orchestratorCommonArgs = {
+          src = craneLib.cleanCargoSource (craneLib.path ./hydra-orchestrator);
+          buildInputs = lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.libiconv
+          ];
+        };
+
+        orchestratorCargoArtifacts = craneLib.buildDepsOnly orchestratorCommonArgs;
+
+        # ============================================================
+        # HYDRA-CLI (CLI wrapper, depends on hydra-orchestrator)
+        # ============================================================
+        cliCommonArgs = {
+          src = craneLib.cleanCargoSource (craneLib.path ./hydra-cli);
+          buildInputs = lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.libiconv
+          ];
+        };
+
+        cliCargoArtifacts = craneLib.buildDepsOnly (cliCommonArgs // {
+          cargoExtraArgs = "--package hydra-orchestrator";
+        });
+
+        hydra-cli-pkg = craneLib.buildPackage (cliCommonArgs // {
+          cargoArtifacts = cliCargoArtifacts;
+          pname = "hydra-cli";
+        });
+
       in
       {
         # --- Packages ---
@@ -158,6 +189,7 @@
           hydra-mail = hydra-mail-pkg;
           hydra-observer = hydra-observer-pkg;
           hydra-wt = hydra-wt-pkg;
+          hydra-cli = hydra-cli-pkg;
         };
 
         # --- Apps ---
@@ -166,6 +198,7 @@
           hydra-mail = flake-utils.lib.mkApp { drv = hydra-mail-pkg; };
           hydra-observer = flake-utils.lib.mkApp { drv = hydra-observer-pkg; };
           hydra-wt = flake-utils.lib.mkApp { drv = hydra-wt-pkg; };
+          hydra = flake-utils.lib.mkApp { drv = hydra-cli-pkg; };
         };
 
         # --- Checks ---
@@ -178,6 +211,12 @@
           });
           hydra-wt = craneLib.cargoClippy (wtCommonArgs // {
             cargoArtifacts = wtCargoArtifacts;
+          });
+          hydra-orchestrator = craneLib.cargoClippy (orchestratorCommonArgs // {
+            cargoArtifacts = orchestratorCargoArtifacts;
+          });
+          hydra-cli = craneLib.cargoClippy (cliCommonArgs // {
+            cargoArtifacts = cliCargoArtifacts;
           });
         };
 
@@ -200,6 +239,10 @@
             pkgs.fd
             pkgs.ripgrep
             pkgs.bat
+            # Include built binaries for testing
+            hydra-mail-pkg
+            hydra-wt-pkg
+            # hydra-cli-pkg  # TODO: Add back after generating Cargo.lock
           ];
 
           LD_LIBRARY_PATH = lib.makeLibraryPath ([
@@ -221,8 +264,8 @@
             export VK_LAYER_PATH="${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d"
 
             echo "--- Hydra Tools Development Environment ---"
-            echo "Available packages: hydra-mail, hydra-observer, hydra-wt"
-            echo "Build with: nix build .#hydra-mail (or hydra-observer, hydra-wt)"
+            echo "Available packages: hydra-mail, hydra-observer, hydra-wt, hydra-cli"
+            echo "Build with: nix build .#hydra-mail (or hydra-observer, hydra-wt, hydra-cli)"
           '';
         });
       });
