@@ -5,6 +5,10 @@ edition = "2021"
 description = "Worktree management for the Hydra ecosystem"
 license = "MIT"
 
+[lib]
+name = "hydra_wt"
+path = "src/lib.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
