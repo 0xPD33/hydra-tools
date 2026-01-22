@@ -1,0 +1,14 @@
+[package]
+name = "hydra-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hydra"
+path = "src/main.rs"
+
+[dependencies]
+hydra-orchestrator = { path = "../hydra-orchestrator", features = ["worktree"] }
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+ansi_term = "0.12"
