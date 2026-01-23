@@ -1,5 +1,5 @@
 {
-  description = "Hydra Tools - Agent utilities (hydra-mail, hydra-observer, hydra-wt, hydralph, hydra-orchestrator)";
+  description = "Hydra Tools - Agent utilities (hydra-mail, hydra-wt, hydralph, hydra-orchestrator)";
 
   # --- Inputs ---
   # These are the external dependencies for our development environment.
@@ -80,11 +80,12 @@
         });
 
         # ============================================================
-        # HYDRA-OBSERVER (depends on mascots)
+        # HYDRA-OBSERVER (WIP - depends on mascots, not ready yet)
         # ============================================================
-        # Note: hydra-observer is now a thin integration layer.
+        # Note: hydra-observer is a thin integration layer.
         # Most GPU/Wayland deps come from the mascots crate.
         # We still need these for linking when building with mascots.
+        # DISABLED UNTIL MASCOTS IS READY
         observerBuildInputs = [
           pkgs.pkg-config
           # Wayland (needed for linking with mascots)
@@ -187,7 +188,7 @@
         packages = {
           default = hydra-mail-pkg;
           hydra-mail = hydra-mail-pkg;
-          hydra-observer = hydra-observer-pkg;
+          # hydra-observer = hydra-observer-pkg;  # WIP - depends on mascots
           hydra-wt = hydra-wt-pkg;
           hydra-cli = hydra-cli-pkg;
         };
@@ -196,7 +197,7 @@
         apps = {
           default = flake-utils.lib.mkApp { drv = hydra-mail-pkg; };
           hydra-mail = flake-utils.lib.mkApp { drv = hydra-mail-pkg; };
-          hydra-observer = flake-utils.lib.mkApp { drv = hydra-observer-pkg; };
+          # hydra-observer = flake-utils.lib.mkApp { drv = hydra-observer-pkg; };  # WIP
           hydra-wt = flake-utils.lib.mkApp { drv = hydra-wt-pkg; };
           hydra = flake-utils.lib.mkApp { drv = hydra-cli-pkg; };
         };
@@ -206,9 +207,9 @@
           hydra-mail = craneLib.cargoClippy (mailCommonArgs // {
             cargoArtifacts = mailCargoArtifacts;
           });
-          hydra-observer = craneLib.cargoClippy (observerCommonArgs // {
-            cargoArtifacts = observerCargoArtifacts;
-          });
+          # hydra-observer = craneLib.cargoClippy (observerCommonArgs // {  # WIP
+          #   cargoArtifacts = observerCargoArtifacts;
+          # });
           hydra-wt = craneLib.cargoClippy (wtCommonArgs // {
             cargoArtifacts = wtCargoArtifacts;
           });
@@ -264,8 +265,8 @@
             export VK_LAYER_PATH="${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d"
 
             echo "--- Hydra Tools Development Environment ---"
-            echo "Available packages: hydra-mail, hydra-observer, hydra-wt, hydra-cli"
-            echo "Build with: nix build .#hydra-mail (or hydra-observer, hydra-wt, hydra-cli)"
+            echo "Available packages: hydra-mail, hydra-wt, hydra-cli"
+            echo "Build with: nix build .#hydra-mail (or hydra-wt, hydra-cli)"
           '';
         });
       });

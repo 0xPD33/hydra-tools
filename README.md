@@ -63,7 +63,7 @@ Lightweight in-memory pub/sub messaging system with TOON encoding for token-effi
 - 📼 Replay buffer - Last 100 messages per channel
 - 🎯 Zero dependencies - Pure Rust, no external brokers
 
-**Status**: v0.1.0 | **Required by**: hydra-wt, hydra-observer
+**Status**: v0.1.0 | **Required by**: hydra-wt
 
 ### [hydra-wt](hydra-wt/) (Worktree Manager)
 
@@ -75,17 +75,6 @@ Worktree management for parallel development with automatic port allocation and 
 - 📡 Hydra Mail integration - Emit events to `sys:registry` channel
 
 **Status**: v0.1.0 | **Requires**: hydra-mail
-
-### [hydra-observer](hydra-observer/) (Mascots Integration)
-
-HydraMail integration layer for the [Mascots](https://github.com/0xPD33/mascots) desktop companion.
-
-- 🔗 Connects Mascots to HydraMail channels
-- 📡 Reacts to `repo:delta`, `team:alert`, `team:status` messages
-- 🎭 Shows agent activity through mascot animations
-- 🖱️ Click-to-interact with Hydra ecosystem
-
-**Status**: v0.1.0 | **Requires**: hydra-mail, [Mascots](https://github.com/0xPD33/mascots)
 
 ### [hydra-orchestrator](hydra-orchestrator/) (Session Management)
 
@@ -134,18 +123,15 @@ Shell script implementing the "Ralph loop" for autonomous agent iteration.
     │             │             │             │
     ▼             ▼             ▼             ▼
 ┌─────────┐ ┌───────────┐ ┌───────────┐ ┌──────────┐
-│hydra-wt │ │  hydra-   │ │  hydra-   │ │ hydralph │
-│(worktree│ │orchestrator│ │ observer │ │  (shell) │
-└────┬────┘ └─────┬─────┘ └─────┬─────┘ └──────────┘
-     │            │             │
-     │      ┌─────┴─────┐       │
-     │      ▼           │       ▼
-     │ ┌─────────┐      │ ┌───────────┐
-     └─│hydra-cli│      │ │  Mascots  │
-       └─────────┘      │ │(external) │
-                        │ └───────────┘
-                        │
-                   (optional)
+│hydra-wt │ │  hydra-   │ │           │ │ hydralph │
+│(worktree│ │orchestrator│ │           │ │  (shell) │
+└────┬────┘ └─────┬─────┘ └───────────┘ └──────────┘
+     │            │
+     │      ┌─────┴─────┐
+     │      ▼
+     │ ┌─────────┐
+     └─│hydra-cli│
+       └─────────┘
 ```
 
 ## Building
@@ -157,7 +143,6 @@ Shell script implementing the "Ralph loop" for autonomous agent iteration.
 nix build .#hydra-mail
 nix build .#hydra-wt
 nix build .#hydra-cli
-nix build .#hydra-observer
 
 # Enter development shell
 nix develop
@@ -170,7 +155,6 @@ nix develop
 cargo build --release -p hydra-mail
 cargo build --release -p hydra-wt
 cargo build --release -p hydra-cli
-cargo build --release -p hydra-observer
 ```
 
 ## Repository Structure
@@ -187,8 +171,6 @@ hydra-tools/
 │   └── src/
 ├── hydra-cli/            # Unified CLI for orchestrator
 │   └── src/
-├── hydra-observer/       # Mascots integration
-│   └── src/
 ├── hydralph/             # Ralph loop shell script
 │   ├── hydralph.sh
 │   └── prompt.md
@@ -202,10 +184,9 @@ hydra-tools/
 |---------|--------|-----------------|
 | hydra-mail | [README](hydra-mail/README.md) | [CLAUDE.md](hydra-mail/CLAUDE.md) |
 | hydra-wt | [README](hydra-wt/README.md) | [CLAUDE.md](hydra-wt/CLAUDE.md) |
-| hydra-orchestrator | - | [CLAUDE.md](hydra-orchestrator/CLAUDE.md) |
-| hydra-cli | - | [CLAUDE.md](hydra-cli/CLAUDE.md) |
-| hydra-observer | [README](hydra-observer/README.md) | - |
-| hydralph | - | [prompt.md](hydralph/prompt.md) |
+| hydra-orchestrator | [README](hydra-orchestrator/README.md) | [CLAUDE.md](hydra-orchestrator/CLAUDE.md) |
+| hydra-cli | [README](hydra-cli/README.md) | [CLAUDE.md](hydra-cli/CLAUDE.md) |
+| hydralph | [README](hydralph/README.md) | [prompt.md](hydralph/prompt.md) |
 
 ## License
 
