@@ -47,6 +47,37 @@ enum Commands {
         /// Specific branch to show (optional)
         branch: Option<String>,
     },
+
+    /// Merge a worktree branch into another
+    Merge {
+        /// Source branch to merge from
+        source: String,
+
+        /// Target branch to merge into
+        target: String,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+
+        /// Create merge commit even for fast-forward
+        #[arg(long)]
+        no_ff: bool,
+
+        /// Preview without merging
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Remove source worktree after successful merge
+        #[arg(long)]
+        cleanup: bool,
+    },
+
+    /// Abort an in-progress merge
+    MergeAbort {
+        /// Branch with in-progress merge
+        branch: String,
+    },
 }
 
 fn main() {
@@ -58,6 +89,15 @@ fn main() {
         Commands::List => cmd_list(),
         Commands::Remove { branch, force } => cmd_remove(&branch, force),
         Commands::Status { branch } => cmd_status(branch.as_deref()),
+        Commands::Merge {
+            source,
+            target,
+            force,
+            no_ff,
+            dry_run,
+            cleanup,
+        } => cmd_merge(&source, &target, force, no_ff, dry_run, cleanup),
+        Commands::MergeAbort { branch } => cmd_merge_abort(&branch),
     };
 
     if let Err(e) = result {
@@ -155,8 +195,14 @@ fn cmd_list() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<20} {:<6} {:<30} {:<10}", "BRANCH", "PORT", "PATH", "STATUS");
-    println!("{}", "-".repeat(70));
+    // Detect main branch
+    let main_branch = detect_main_branch();
+
+    println!(
+        "{:<20} {:<6} {:<25} {:<10} {:<20}",
+        "BRANCH", "PORT", "PATH", "STATUS", "COMMITS AHEAD"
+    );
+    println!("{}", "-".repeat(85));
 
     for (branch, port) in registry.list() {
         let wt_path = cfg.worktree_path(branch);
@@ -165,16 +211,52 @@ fn cmd_list() -> Result<()> {
         } else {
             "missing"
         };
+
+        // Get commits ahead of main (if not the main branch itself)
+        let commits_info = if *branch != main_branch {
+            match worktree::commits_ahead(branch, &main_branch) {
+                Ok(commits) if commits.is_empty() => "up to date".to_string(),
+                Ok(commits) => {
+                    // Check if can merge without conflicts
+                    let can_merge_status = if worktree::exists(&wt_path) {
+                        match worktree::can_merge(&wt_path, &main_branch) {
+                            Ok(true) => "",
+                            Ok(false) => " (conflicts)",
+                            Err(_) => "",
+                        }
+                    } else {
+                        ""
+                    };
+                    format!("{}{}", commits.len(), can_merge_status)
+                }
+                Err(_) => "-".to_string(),
+            }
+        } else {
+            "-".to_string()
+        };
+
         println!(
-            "{:<20} {:<6} {:<30} {:<10}",
+            "{:<20} {:<6} {:<25} {:<10} {:<20}",
             branch,
             port,
             wt_path.display(),
-            status
+            status,
+            commits_info
         );
     }
 
     Ok(())
+}
+
+fn detect_main_branch() -> String {
+    // Try common main branch names
+    for branch in &["main", "master"] {
+        if worktree::branch_exists(branch).unwrap_or(false) {
+            return branch.to_string();
+        }
+    }
+    // Fallback
+    "main".to_string()
 }
 
 fn cmd_remove(branch: &str, force: bool) -> Result<()> {
@@ -254,6 +336,216 @@ fn cmd_status(branch: Option<&str>) -> Result<()> {
             println!("  Ports free: {}", (cfg.ports.range_end - cfg.ports.range_start + 1) as usize - total);
         }
     }
+
+    Ok(())
+}
+
+fn cmd_merge(
+    source: &str,
+    target: &str,
+    force: bool,
+    no_ff: bool,
+    dry_run: bool,
+    cleanup: bool,
+) -> Result<()> {
+    let cfg = config::WtConfig::load()?;
+    let registry = ports::PortRegistry::load()?;
+
+    // Validate: cannot merge branch into itself
+    if source == target {
+        anyhow::bail!("Cannot merge branch '{}' into itself", source);
+    }
+
+    // Validate source branch exists
+    if !worktree::branch_exists(source)? {
+        anyhow::bail!("Source branch '{}' does not exist", source);
+    }
+
+    // Validate target branch exists
+    if !worktree::branch_exists(target)? {
+        anyhow::bail!("Target branch '{}' does not exist", target);
+    }
+
+    // Get target worktree path (could be main repo or a worktree)
+    let target_path = match worktree::get_worktree_path(target)? {
+        Some(path) => path,
+        None => {
+            // Check if target is the current branch in the main repo
+            let repo_root = config::get_repo_root()?;
+            let current = worktree::get_current_branch(&repo_root)?;
+            if current == target {
+                repo_root
+            } else {
+                anyhow::bail!(
+                    "Target branch '{}' is not checked out in any worktree. \
+                    Create a worktree first with: hydra-wt create {}",
+                    target,
+                    target
+                );
+            }
+        }
+    };
+
+    // Check for uncommitted changes in target
+    if worktree::has_uncommitted_changes(&target_path)? {
+        anyhow::bail!(
+            "Target worktree has uncommitted changes. \
+            Commit or stash changes first:\n  cd {} && git status",
+            target_path.display()
+        );
+    }
+
+    // Check for merge in progress
+    if worktree::is_merge_in_progress(&target_path) {
+        anyhow::bail!(
+            "A merge is already in progress in {}.\n\
+            Complete it with: cd {} && git commit\n\
+            Or abort with: hydra-wt merge-abort {}",
+            target_path.display(),
+            target_path.display(),
+            target
+        );
+    }
+
+    // Get commits ahead
+    let commits = worktree::commits_ahead(source, target)?;
+
+    if commits.is_empty() {
+        println!("Already up to date. Nothing to merge.");
+        return Ok(());
+    }
+
+    // Show preview
+    println!("Merge preview: {} → {}", source, target);
+    println!("{} commit(s) to merge:\n", commits.len());
+    for commit in &commits {
+        println!(
+            "  {} {}",
+            &commit.hash[..7.min(commit.hash.len())],
+            commit.message
+        );
+    }
+    println!();
+
+    if dry_run {
+        // Check if merge would have conflicts
+        let can_merge = worktree::can_merge(&target_path, source)?;
+        if can_merge {
+            println!("✓ Merge can proceed without conflicts");
+        } else {
+            println!("⚠️  Merge would have conflicts");
+        }
+        return Ok(());
+    }
+
+    // Confirm unless --force
+    if !force {
+        print!("Proceed with merge? [y/N] ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Merge cancelled.");
+            return Ok(());
+        }
+    }
+
+    // Emit merge started event
+    hydra::emit_merge_started(source, target, commits.len())?;
+
+    // Perform the merge
+    println!("Merging {} into {}...", source, target);
+    let result = worktree::merge(&target_path, source, no_ff)?;
+
+    match result {
+        worktree::MergeResult::Success { merge_commit } => {
+            println!(
+                "✓ Merge successful (commit: {})",
+                &merge_commit[..7.min(merge_commit.len())]
+            );
+            hydra::emit_merge_completed(source, target, &merge_commit)?;
+        }
+        worktree::MergeResult::FastForward { new_head } => {
+            println!(
+                "✓ Fast-forward merge (head: {})",
+                &new_head[..7.min(new_head.len())]
+            );
+            hydra::emit_merge_completed(source, target, &new_head)?;
+        }
+        worktree::MergeResult::Conflict { files } => {
+            println!("\n⚠️  Merge conflict in {} file(s):", files.len());
+            for file in &files {
+                println!("  - {}", file);
+            }
+            println!("\nResolve conflicts in: {}", target_path.display());
+            println!("Then run: cd {} && git add . && git commit", target_path.display());
+            println!("Or abort: hydra-wt merge-abort {}", target);
+
+            hydra::emit_merge_conflict(source, target, &target_path.to_string_lossy(), &files)?;
+            return Ok(());
+        }
+        worktree::MergeResult::NothingToMerge => {
+            println!("Already up to date. Nothing to merge.");
+            return Ok(());
+        }
+    }
+
+    // Cleanup if requested
+    if cleanup {
+        println!("\nCleaning up source worktree...");
+        let source_wt_path = cfg.worktree_path(source);
+
+        if worktree::exists(&source_wt_path) {
+            worktree::remove(&source_wt_path, true)?;
+
+            // Free port if allocated
+            let mut registry = registry;
+            if let Ok(port) = registry.free(source) {
+                registry.save()?;
+                println!("Removed worktree '{}' and freed port {}", source, port);
+            } else {
+                println!("Removed worktree '{}'", source);
+            }
+
+            hydra::emit_worktree_removed(source)?;
+        } else {
+            println!("Source worktree '{}' not found (may not be managed by hydra-wt)", source);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_merge_abort(branch: &str) -> Result<()> {
+    let _cfg = config::WtConfig::load()?;
+
+    // Find the worktree for this branch
+    let target_path = match worktree::get_worktree_path(branch)? {
+        Some(path) => path,
+        None => {
+            // Check if it's the current branch in main repo
+            let repo_root = config::get_repo_root()?;
+            let current = worktree::get_current_branch(&repo_root)?;
+            if current == branch {
+                repo_root
+            } else {
+                anyhow::bail!(
+                    "Branch '{}' is not checked out in any worktree",
+                    branch
+                );
+            }
+        }
+    };
+
+    // Check if merge is in progress
+    if !worktree::is_merge_in_progress(&target_path) {
+        anyhow::bail!("No merge in progress in '{}'", branch);
+    }
+
+    // Abort the merge
+    worktree::merge_abort(&target_path)?;
+    println!("Merge aborted in '{}'", branch);
 
     Ok(())
 }
