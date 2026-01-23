@@ -87,6 +87,41 @@ HydraMail integration layer for the [Mascots](https://github.com/0xPD33/mascots)
 
 **Status**: v0.1.0 | **Requires**: hydra-mail, [Mascots](https://github.com/0xPD33/mascots)
 
+### [hydra-orchestrator](hydra-orchestrator/) (Session Management)
+
+Multi-session agent orchestration library with tmux integration.
+
+- 🎛️ Session lifecycle management - Spawn, monitor, and teardown agent sessions
+- 🔀 Worktree isolation - Each session can run in its own git worktree
+- 💾 Persistent state - Sessions survive restarts via filesystem store
+- 📡 Hydra Mail integration - Subscribe to channels, react to events
+
+**Status**: v0.1.0 | **Requires**: hydra-mail, hydra-wt (optional)
+
+### [hydra-cli](hydra-cli/) (Unified CLI)
+
+Command-line interface for hydra-orchestrator.
+
+- `hydra init` - Initialize hydralph in current directory
+- `hydra spawn` - Spawn a new agent session with PRD
+- `hydra ls` - List active sessions
+- `hydra status <id>` - Get session status
+- `hydra attach <id>` - Attach to session tmux
+
+**Status**: v0.1.0 | **Requires**: hydra-orchestrator
+
+### [hydralph](hydralph/) (Agent Loop)
+
+Shell script implementing the "Ralph loop" for autonomous agent iteration.
+
+- 🔄 Iterative agent execution - Run agent in loop until task complete
+- 📋 PRD-driven - Uses JSON PRD with user stories
+- 📝 Progress tracking - Maintains progress.txt for context
+- 🏷️ Promise tags - Detects `<promise>COMPLETE</promise>` or `<promise>BLOCKED</promise>`
+- 📡 Hydra Mail integration - Emits status events
+
+**Status**: v0.1.0 | **Requires**: claude CLI (or compatible agent)
+
 ## Dependency Graph
 
 ```
@@ -95,19 +130,22 @@ HydraMail integration layer for the [Mascots](https://github.com/0xPD33/mascots)
 │            (pub/sub backbone)                    │
 └─────────────────┬───────────────────────────────┘
                   │
-        ┌─────────┴─────────┐
-        │                   │
-        ▼                   ▼
-┌───────────────┐   ┌───────────────┐
-│   hydra-wt    │   │hydra-observer │
-│  (worktrees)  │   │(mascots glue) │
-└───────────────┘   └───────┬───────┘
-                            │
-                            ▼
-                    ┌───────────────┐
-                    │    Mascots    │
-                    │  (external)   │
-                    └───────────────┘
+    ┌─────────────┼─────────────┬─────────────┐
+    │             │             │             │
+    ▼             ▼             ▼             ▼
+┌─────────┐ ┌───────────┐ ┌───────────┐ ┌──────────┐
+│hydra-wt │ │  hydra-   │ │  hydra-   │ │ hydralph │
+│(worktree│ │orchestrator│ │ observer │ │  (shell) │
+└────┬────┘ └─────┬─────┘ └─────┬─────┘ └──────────┘
+     │            │             │
+     │      ┌─────┴─────┐       │
+     │      ▼           │       ▼
+     │ ┌─────────┐      │ ┌───────────┐
+     └─│hydra-cli│      │ │  Mascots  │
+       └─────────┘      │ │(external) │
+                        │ └───────────┘
+                        │
+                   (optional)
 ```
 
 ## Building
@@ -118,6 +156,7 @@ HydraMail integration layer for the [Mascots](https://github.com/0xPD33/mascots)
 # Build specific package
 nix build .#hydra-mail
 nix build .#hydra-wt
+nix build .#hydra-cli
 nix build .#hydra-observer
 
 # Enter development shell
@@ -127,10 +166,11 @@ nix develop
 ### With Cargo
 
 ```bash
-# From each project directory
-cd hydra-mail && cargo build --release
-cd hydra-wt && cargo build --release
-cd hydra-observer && cargo build --release
+# From workspace root
+cargo build --release -p hydra-mail
+cargo build --release -p hydra-wt
+cargo build --release -p hydra-cli
+cargo build --release -p hydra-observer
 ```
 
 ## Repository Structure
@@ -140,14 +180,18 @@ hydra-tools/
 ├── hydra-mail/           # Core pub/sub messaging
 │   ├── src/
 │   ├── docs/
-│   ├── .claude-plugin/
-│   └── README.md
-├── hydra-wt/             # Worktree manager
-│   ├── src/
-│   └── README.md
+│   └── .claude-plugin/
+├── hydra-wt/             # Worktree manager with merge support
+│   └── src/
+├── hydra-orchestrator/   # Multi-session orchestration library
+│   └── src/
+├── hydra-cli/            # Unified CLI for orchestrator
+│   └── src/
 ├── hydra-observer/       # Mascots integration
-│   ├── src/
-│   └── README.md
+│   └── src/
+├── hydralph/             # Ralph loop shell script
+│   ├── hydralph.sh
+│   └── prompt.md
 ├── flake.nix             # Nix build definitions
 └── README.md             # This file
 ```
@@ -158,7 +202,10 @@ hydra-tools/
 |---------|--------|-----------------|
 | hydra-mail | [README](hydra-mail/README.md) | [CLAUDE.md](hydra-mail/CLAUDE.md) |
 | hydra-wt | [README](hydra-wt/README.md) | [CLAUDE.md](hydra-wt/CLAUDE.md) |
+| hydra-orchestrator | - | [CLAUDE.md](hydra-orchestrator/CLAUDE.md) |
+| hydra-cli | - | [CLAUDE.md](hydra-cli/CLAUDE.md) |
 | hydra-observer | [README](hydra-observer/README.md) | - |
+| hydralph | - | [prompt.md](hydralph/prompt.md) |
 
 ## License
 
