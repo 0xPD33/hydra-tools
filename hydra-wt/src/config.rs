@@ -148,3 +148,129 @@ pub fn get_repo_root() -> Result<PathBuf> {
         .context("Invalid UTF-8 in git output")?;
     Ok(PathBuf::from(path.trim()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = WtConfig::default();
+        assert_eq!(config.ports.range_start, 3001);
+        assert_eq!(config.ports.range_end, 3099);
+        assert_eq!(config.env.template, ".env.template");
+        assert_eq!(config.env.output, ".env.local");
+        assert_eq!(config.worktrees.directory, "../");
+    }
+
+    #[test]
+    fn test_worktree_path() {
+        let config = WtConfig::default();
+        let path = config.worktree_path("feature-branch");
+        assert_eq!(path, PathBuf::from("../feature-branch"));
+    }
+
+    #[test]
+    fn test_worktree_dir() {
+        let config = WtConfig::default();
+        let dir = config.worktree_dir();
+        assert_eq!(dir, PathBuf::from("../"));
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = WtConfig::default();
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("range_start"));
+        assert!(toml_str.contains("range_end"));
+        assert!(toml_str.contains("template"));
+    }
+
+    #[test]
+    fn test_config_deserialization() {
+        let toml_str = r#"
+            [ports]
+            range_start = 4000
+            range_end = 4100
+
+            [env]
+            template = ".env.example"
+            output = ".env"
+
+            [worktrees]
+            directory = "../worktrees/"
+        "#;
+        let config: WtConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.ports.range_start, 4000);
+        assert_eq!(config.ports.range_end, 4100);
+        assert_eq!(config.env.template, ".env.example");
+        assert_eq!(config.env.output, ".env");
+        assert_eq!(config.worktrees.directory, "../worktrees/");
+    }
+
+    #[test]
+    fn test_artifacts_config_default() {
+        let artifacts = ArtifactsConfig::default();
+        assert_eq!(artifacts.symlink.len(), 0);
+        assert_eq!(artifacts.copy.len(), 0);
+    }
+
+    #[test]
+    fn test_hooks_config_default() {
+        let hooks = HooksConfig::default();
+        assert_eq!(hooks.post_create.len(), 0);
+    }
+
+    #[test]
+    fn test_load_missing_config_fails() {
+        // Try to load from non-existent directory
+        let orig_dir = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("hydra-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let result = WtConfig::load();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Run 'hydra-wt init' first"));
+
+        std::env::set_current_dir(orig_dir).unwrap();
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_init_without_hydra_dir_fails() {
+        let orig_dir = std::env::current_dir().unwrap();
+        let temp_dir = std::env::temp_dir().join(format!("hydra-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let result = WtConfig::init();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(".hydra/ directory not found"));
+
+        std::env::set_current_dir(orig_dir).unwrap();
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_config_with_invalid_toml() {
+        let toml_str = r#"
+            [ports]
+            range_start = "not a number"
+            range_end = 4100
+        "#;
+        let result: Result<WtConfig, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_with_missing_required_fields() {
+        let toml_str = r#"
+            [ports]
+            range_start = 3000
+            # Missing range_end
+        "#;
+        let result: Result<WtConfig, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
+    }
+}

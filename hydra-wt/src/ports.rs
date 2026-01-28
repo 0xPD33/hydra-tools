@@ -78,3 +78,154 @@ impl PortRegistry {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_allocate_port() {
+        let mut registry = PortRegistry::default();
+        let port = registry.allocate("feature-a", 3000, 3010).unwrap();
+        assert_eq!(port, 3000);
+        assert_eq!(registry.get("feature-a"), Some(3000));
+    }
+
+    #[test]
+    fn test_allocate_multiple_ports() {
+        let mut registry = PortRegistry::default();
+        let port1 = registry.allocate("feature-a", 3000, 3010).unwrap();
+        let port2 = registry.allocate("feature-b", 3000, 3010).unwrap();
+        assert_eq!(port1, 3000);
+        assert_eq!(port2, 3001);
+        assert_ne!(port1, port2);
+    }
+
+    #[test]
+    fn test_allocate_duplicate_branch_fails() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        let result = registry.allocate("feature-a", 3000, 3010);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already has port"));
+    }
+
+    #[test]
+    fn test_allocate_range_exhausted() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3001).unwrap();
+        registry.allocate("feature-b", 3000, 3001).unwrap();
+        let result = registry.allocate("feature-c", 3000, 3001);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No free ports"));
+    }
+
+    #[test]
+    fn test_free_port() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        let freed = registry.free("feature-a").unwrap();
+        assert_eq!(freed, 3000);
+        assert_eq!(registry.get("feature-a"), None);
+    }
+
+    #[test]
+    fn test_free_nonexistent_branch_fails() {
+        let mut registry = PortRegistry::default();
+        let result = registry.free("nonexistent");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No port allocated"));
+    }
+
+    #[test]
+    fn test_get_port() {
+        let mut registry = PortRegistry::default();
+        assert_eq!(registry.get("feature-a"), None);
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        assert_eq!(registry.get("feature-a"), Some(3000));
+    }
+
+    #[test]
+    fn test_list_ports() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        registry.allocate("feature-b", 3000, 3010).unwrap();
+
+        let ports: HashMap<String, u16> = registry.list()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+
+        assert_eq!(ports.len(), 2);
+        assert!(ports.contains_key("feature-a"));
+        assert!(ports.contains_key("feature-b"));
+    }
+
+    #[test]
+    fn test_reuse_freed_port() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        registry.free("feature-a").unwrap();
+        let port = registry.allocate("feature-b", 3000, 3010).unwrap();
+        assert_eq!(port, 3000);
+    }
+
+    #[test]
+    fn test_invalid_port_range() {
+        let mut registry = PortRegistry::default();
+        // Range where start > end
+        let result = registry.allocate("feature-a", 3010, 3000);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No free ports"));
+    }
+
+    #[test]
+    fn test_single_port_range() {
+        let mut registry = PortRegistry::default();
+        let port = registry.allocate("feature-a", 3000, 3000).unwrap();
+        assert_eq!(port, 3000);
+
+        // Second allocation should fail
+        let result = registry.allocate("feature-b", 3000, 3000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_serialize_deserialize_registry() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        registry.allocate("feature-b", 3000, 3010).unwrap();
+
+        let json = serde_json::to_string(&registry).unwrap();
+        let deserialized: PortRegistry = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.get("feature-a"), Some(3000));
+        assert_eq!(deserialized.get("feature-b"), Some(3001));
+    }
+
+    #[test]
+    fn test_deserialize_invalid_json() {
+        let invalid_json = r#"{"feature-a": "not a number"}"#;
+        let result: Result<PortRegistry, _> = serde_json::from_str(invalid_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_allocate_with_zero_port() {
+        let mut registry = PortRegistry::default();
+        // Port 0 is technically valid but unusual
+        let port = registry.allocate("feature-a", 0, 10).unwrap();
+        assert_eq!(port, 0);
+    }
+
+    #[test]
+    fn test_free_twice_fails() {
+        let mut registry = PortRegistry::default();
+        registry.allocate("feature-a", 3000, 3010).unwrap();
+        registry.free("feature-a").unwrap();
+
+        // Second free should fail
+        let result = registry.free("feature-a");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No port allocated"));
+    }
+}

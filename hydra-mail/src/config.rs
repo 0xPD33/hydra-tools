@@ -164,4 +164,76 @@ rate_limit_per_second = 100
         assert_eq!(loaded.limits.replay_buffer_capacity, 500);
         assert_eq!(loaded.limits.rate_limit_per_second, 100);
     }
+
+    #[test]
+    fn test_config_missing_required_fields() {
+        let incomplete_config = r#"
+project_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+# Missing socket_path and default_topics
+"#;
+        let result: Result<Config, _> = toml::from_str(incomplete_config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_invalid_uuid_format() {
+        let invalid_config = r#"
+project_uuid = "not-a-valid-uuid"
+socket_path = ".hydra/hydra.sock"
+default_topics = ["repo:delta"]
+"#;
+        // Invalid UUID should fail to deserialize
+        let result: Result<Config, _> = toml::from_str(invalid_config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_from_nonexistent_directory() {
+        let temp = TempDir::new().unwrap();
+        let nonexistent = temp.path().join("does-not-exist");
+
+        let result = Config::load(&nonexistent);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to read"));
+    }
+
+    #[test]
+    fn test_config_with_empty_topics() {
+        let config = r#"
+project_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+socket_path = ".hydra/hydra.sock"
+default_topics = []
+"#;
+        let loaded: Config = toml::from_str(config).unwrap();
+        assert_eq!(loaded.default_topics.len(), 0);
+    }
+
+    #[test]
+    fn test_config_with_many_topics() {
+        let config = r#"
+project_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+socket_path = ".hydra/hydra.sock"
+default_topics = ["topic1", "topic2", "topic3", "topic4", "topic5"]
+"#;
+        let loaded: Config = toml::from_str(config).unwrap();
+        assert_eq!(loaded.default_topics.len(), 5);
+    }
+
+    #[test]
+    fn test_limits_with_zero_values() {
+        let config = r#"
+project_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+socket_path = ".hydra/hydra.sock"
+default_topics = ["repo:delta"]
+
+[limits]
+max_message_size = 0
+replay_buffer_capacity = 0
+rate_limit_per_second = 0
+"#;
+        let loaded: Config = toml::from_str(config).unwrap();
+        assert_eq!(loaded.limits.max_message_size, 0);
+        assert_eq!(loaded.limits.replay_buffer_capacity, 0);
+        assert_eq!(loaded.limits.rate_limit_per_second, 0);
+    }
 }
