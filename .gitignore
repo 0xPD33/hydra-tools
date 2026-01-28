@@ -7,6 +7,8 @@ Cargo.lock
 !hydra-mail/Cargo.lock
 !hydra-wt/Cargo.lock
 !hydra-observer/Cargo.lock
+!hydra-cli/Cargo.lock
+!hydra-orchestrator/Cargo.lock
 
 # Nix build outputs
 result

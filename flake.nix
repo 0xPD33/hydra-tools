@@ -154,32 +154,31 @@
         # ============================================================
         # HYDRA-ORCHESTRATOR (Session management library)
         # ============================================================
-        orchestratorCommonArgs = {
-          src = craneLib.cleanCargoSource (craneLib.path ./hydra-orchestrator);
+        # Uses workspace root since hydra-cli depends on it via path
+        workspaceCommonArgs = {
+          src = craneLib.cleanCargoSource (craneLib.path ./.);
           buildInputs = lib.optionals pkgs.stdenv.isDarwin [
             pkgs.libiconv
           ];
         };
 
-        orchestratorCargoArtifacts = craneLib.buildDepsOnly orchestratorCommonArgs;
+        orchestratorCargoArtifacts = craneLib.buildDepsOnly (workspaceCommonArgs // {
+          pname = "hydra-orchestrator-deps";
+          cargoExtraArgs = "--package hydra-orchestrator";
+        });
 
         # ============================================================
         # HYDRA-CLI (CLI wrapper, depends on hydra-orchestrator)
         # ============================================================
-        cliCommonArgs = {
-          src = craneLib.cleanCargoSource (craneLib.path ./hydra-cli);
-          buildInputs = lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.libiconv
-          ];
-        };
-
-        cliCargoArtifacts = craneLib.buildDepsOnly (cliCommonArgs // {
-          cargoExtraArgs = "--package hydra-orchestrator";
+        cliCargoArtifacts = craneLib.buildDepsOnly (workspaceCommonArgs // {
+          pname = "hydra-cli-deps";
+          cargoExtraArgs = "--package hydra-cli";
         });
 
-        hydra-cli-pkg = craneLib.buildPackage (cliCommonArgs // {
+        hydra-cli-pkg = craneLib.buildPackage (workspaceCommonArgs // {
           cargoArtifacts = cliCargoArtifacts;
           pname = "hydra-cli";
+          cargoExtraArgs = "--package hydra-cli";
         });
 
       in
@@ -213,11 +212,13 @@
           hydra-wt = craneLib.cargoClippy (wtCommonArgs // {
             cargoArtifacts = wtCargoArtifacts;
           });
-          hydra-orchestrator = craneLib.cargoClippy (orchestratorCommonArgs // {
+          hydra-orchestrator = craneLib.cargoClippy (workspaceCommonArgs // {
             cargoArtifacts = orchestratorCargoArtifacts;
+            cargoExtraArgs = "--package hydra-orchestrator";
           });
-          hydra-cli = craneLib.cargoClippy (cliCommonArgs // {
+          hydra-cli = craneLib.cargoClippy (workspaceCommonArgs // {
             cargoArtifacts = cliCargoArtifacts;
+            cargoExtraArgs = "--package hydra-cli";
           });
         };
 
