@@ -181,6 +181,32 @@
           cargoExtraArgs = "--package hydra-cli";
         });
 
+        # ============================================================
+        # HYDRALPH (Shell script for Ralph loop)
+        # ============================================================
+        hydralph-pkg = pkgs.stdenv.mkDerivation {
+          pname = "hydralph";
+          version = "0.1.0";
+          src = ./hydralph;
+
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+
+          installPhase = ''
+            mkdir -p $out/bin $out/share/hydralph
+            cp hydralph.sh $out/bin/hydralph
+            cp prompt.md $out/share/hydralph/
+            chmod +x $out/bin/hydralph
+
+            wrapProgram $out/bin/hydralph \
+              --prefix PATH : ${lib.makeBinPath [ pkgs.jq pkgs.coreutils ]}
+          '';
+
+          meta = with lib; {
+            description = "Ralph loop for autonomous agent iteration";
+            license = licenses.mit;
+          };
+        };
+
       in
       {
         # --- Packages ---
@@ -190,6 +216,7 @@
           # hydra-observer = hydra-observer-pkg;  # WIP - depends on mascots
           hydra-wt = hydra-wt-pkg;
           hydra-cli = hydra-cli-pkg;
+          hydralph = hydralph-pkg;
         };
 
         # --- Apps ---
@@ -199,6 +226,7 @@
           # hydra-observer = flake-utils.lib.mkApp { drv = hydra-observer-pkg; };  # WIP
           hydra-wt = flake-utils.lib.mkApp { drv = hydra-wt-pkg; };
           hydra = flake-utils.lib.mkApp { drv = hydra-cli-pkg; };
+          hydralph = flake-utils.lib.mkApp { drv = hydralph-pkg; };
         };
 
         # --- Checks ---
