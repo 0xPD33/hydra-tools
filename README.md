@@ -136,27 +136,40 @@ Shell script implementing the "Ralph loop" for autonomous agent iteration.
 
 **Status**: v0.1.0 | **Requires**: claude CLI (or compatible agent)
 
+### [hydra-observer](hydra-observer/) (Desktop Companion) ⚠️ Experimental
+
+Integration layer between hydra-mail and [Mascots](https://github.com/0xPD33/mascots) desktop companion.
+
+- 🖥️ Desktop notifications - Surface agent events to your desktop
+- 🎭 Mascot reactions - Animated responses to build/test events
+
+**Status**: v0.1.0 | **Requires**: mascots (external), hydra-mail
+
+> ⚠️ Excluded from default workspace build due to external git dependency.
+
 ## Dependency Graph
 
 ```
-┌─────────────────────────────────────────────────┐
-│                 hydra-mail                       │
-│            (pub/sub backbone)                    │
-└─────────────────┬───────────────────────────────┘
-                  │
-    ┌─────────────┼─────────────┬─────────────┐
-    │             │             │             │
-    ▼             ▼             ▼             ▼
-┌─────────┐ ┌───────────┐ ┌───────────┐ ┌──────────┐
-│hydra-wt │ │  hydra-   │ │           │ │ hydralph │
-│(worktree│ │orchestrator│ │           │ │  (shell) │
-└────┬────┘ └─────┬─────┘ └───────────┘ └──────────┘
-     │            │
-     │      ┌─────┴─────┐
-     │      ▼
-     │ ┌─────────┐
-     └─│hydra-cli│
-       └─────────┘
+                    ┌────────────────┐
+                    │   hydra-mail   │  ← IPC ← hydralph (shell)
+                    │ (pub/sub core) │  ← IPC ← hydra-observer (WIP)
+                    └───────┬────────┘
+                            │
+          ┌─────────────────┼─────────────────┐
+          │                 │                 │
+          ▼                 ▼                 │
+    ┌──────────┐    ┌──────────────┐          │
+    │ hydra-wt │- - │    hydra-    │          │
+    │(worktree)│    │ orchestrator │          │
+    └──────────┘    └──────┬───────┘          │
+                           │                  │
+                           ▼                  │
+                     ┌──────────┐             │
+                     │hydra-cli │─────────────┘
+                     └──────────┘
+
+- - -  = optional dependency
+← IPC  = communicates via socket/CLI, not Rust crate dependency
 ```
 
 ## Building
@@ -179,6 +192,7 @@ nix develop
 # From workspace root
 cargo build --release -p hydra-mail
 cargo build --release -p hydra-wt
+cargo build --release -p hydra-orchestrator
 cargo build --release -p hydra-cli
 ```
 
@@ -196,6 +210,8 @@ hydra-tools/
 │   └── src/
 ├── hydra-cli/            # Unified CLI for orchestrator
 │   └── src/
+├── hydra-observer/       # Desktop companion integration (experimental)
+│   └── src/
 ├── hydralph/             # Ralph loop shell script
 │   ├── hydralph.sh
 │   └── prompt.md
@@ -211,6 +227,7 @@ hydra-tools/
 | hydra-wt | [README](hydra-wt/README.md) | [CLAUDE.md](hydra-wt/CLAUDE.md) |
 | hydra-orchestrator | [README](hydra-orchestrator/README.md) | [CLAUDE.md](hydra-orchestrator/CLAUDE.md) |
 | hydra-cli | [README](hydra-cli/README.md) | [CLAUDE.md](hydra-cli/CLAUDE.md) |
+| hydra-observer | — | [CLAUDE.md](hydra-observer/CLAUDE.md) |
 | hydralph | [README](hydralph/README.md) | [prompt.md](hydralph/prompt.md) |
 
 ## License
