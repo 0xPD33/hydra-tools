@@ -11,7 +11,7 @@ Hydra Mail enables multiple AI agents (like Claude Code, custom agents, or CLI t
 
 ### Key Features
 
-- **<5ms latency** - In-memory Tokio broadcast channels for ultra-fast message delivery
+- **Sub-millisecond latency** - In-memory Tokio broadcast channels for ultra-fast message delivery
 - **30-60% token savings** - TOON (Token-Oriented Object Notation) encoding vs JSON
 - **Project isolation** - UUID-scoped channels prevent cross-project interference
 - **Replay buffer** - Late subscribers automatically get message history (last 100 messages)

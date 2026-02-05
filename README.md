@@ -82,7 +82,7 @@ hydra-mail subscribe --channel repo:delta --once
 
 Lightweight in-memory pub/sub messaging system with TOON encoding for token-efficient agent communication.
 
-- 🚀 <5ms latency - In-memory Tokio broadcast channels
+- 🚀 Sub-millisecond latency - In-memory Tokio broadcast channels
 - 💾 30-60% token savings - TOON encoding
 - 🔒 Project isolation - UUID-scoped channels
 - 📼 Replay buffer - Last 100 messages per channel
